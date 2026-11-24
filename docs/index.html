@@ -5,97 +5,99 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>CABra · Catchment Attributes for Brazil</title>
   <meta name="description" content="CABra: large-sample dataset of hydrological, climatic and physiographic attributes for 735 Brazilian catchments.">
+  <meta name="theme-color" content="#0e1114">
   <link rel="icon" type="image/png" href="assets/img/logo_cabra_1st.png">
+  <link rel="preload" href="assets/vendor/fonts/instrument-serif-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="assets/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="assets/vendor/uplot/uPlot.min.css">
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
-  <header class="topbar">
-    <a class="brand" href="#map">
-      <img src="assets/img/logo_cabra_1st.png" alt="" width="34" height="34">
-      <span><strong>CABra</strong> <small data-i18n="tagline">Catchment Attributes for Brazil</small></span>
-    </a>
-    <nav class="tabs" aria-label="Seções">
+  <header class="top">
+    <a class="wordmark" href="#map">CABra</a>
+    <nav class="nav" aria-label="Seções">
       <a href="#map" data-view="map" data-i18n="nav_map">Mapa</a>
       <a href="#attributes" data-view="attributes" data-i18n="nav_attr">Atributos</a>
       <a href="#about" data-view="about" data-i18n="nav_about">Sobre</a>
     </nav>
-    <div class="top-actions">
-      <a class="btn btn-primary" href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener" data-i18n="download_all">Baixar dados</a>
-      <button class="btn btn-ghost" id="lang" type="button" aria-label="Language">EN</button>
+    <div class="top-right">
+      <a class="ext" href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener"><span data-i18n="download_all">Dados</span> ↗</a>
+      <div class="lang" role="group" aria-label="Idioma">
+        <button type="button" data-lang="pt">PT</button><button type="button" data-lang="en">EN</button>
+      </div>
     </div>
   </header>
 
   <!-- MAPA -->
-  <main id="view-map" class="view">
-    <div id="map" aria-label="Mapa das bacias"></div>
-
-    <div class="map-legend card" id="legend">
-      <label for="colorby" data-i18n="color_by">Colorir por</label>
-      <select id="colorby"></select>
-      <div id="legend-body"></div>
-    </div>
-
-    <aside class="side card" id="side">
+  <main id="view-map" class="view view-map">
+    <aside class="panel" id="panel">
       <div class="search">
-        <input id="search" type="search" autocomplete="off" data-i18n-ph="search_ph" placeholder="Buscar por nome, código ANA ou ID CABra">
+        <input id="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar estação, código ANA ou ID">
         <ul id="search-results" class="search-results" hidden></ul>
       </div>
 
-      <div id="intro" class="intro">
-        <h1 data-i18n="intro_title">735 bacias brasileiras, 1980–2010</h1>
-        <p data-i18n="intro_text">Clique em uma estação no mapa (ou busque acima) para ver o contorno da bacia, os principais atributos e as séries diárias de vazão e precipitação.</p>
-        <div class="stats" id="stats"></div>
-      </div>
+      <section id="intro" class="intro">
+        <p class="kicker" data-i18n="kicker">Catchment Attributes for Brazil · v1</p>
+        <h1 data-i18n-html="intro_title">Setecentas e trinta e cinco bacias, trinta anos de dados.</h1>
+        <p class="lede" data-i18n="intro_text"></p>
+        <p class="howto" data-i18n="intro_how"></p>
+        <div class="v2" data-i18n-html="v2_short"></div>
+      </section>
 
-      <div id="detail" hidden>
-        <div class="detail-head">
-          <div>
-            <div class="eyebrow" id="d-eyebrow"></div>
-            <h2 id="d-name"></h2>
-          </div>
-          <button class="icon-btn" id="d-close" type="button" aria-label="Fechar">×</button>
+      <section id="detail" hidden>
+        <div class="d-top">
+          <p class="kicker" id="d-kicker"></p>
+          <button class="close" id="d-close" type="button" aria-label="Fechar">Esc ✕</button>
         </div>
+        <h2 id="d-name"></h2>
+        <p class="d-sub" id="d-sub"></p>
+
         <dl class="facts" id="d-facts"></dl>
 
-        <div class="charts">
-          <h3 data-i18n="daily_p">Precipitação diária</h3>
+        <div class="block">
+          <h3 data-i18n="hydro">Chuva e vazão diárias</h3>
           <div id="chart-p" class="chart"></div>
-          <h3 data-i18n="daily_q">Vazão diária</h3>
           <div id="chart-q" class="chart"></div>
-          <p class="hint" data-i18n="zoom_hint">Arraste no gráfico para dar zoom; clique duas vezes para voltar.</p>
+          <div class="chart-key"><span class="k-p" data-i18n="key_p">precipitação (mm)</span><span class="k-q" data-i18n="key_q">vazão (m³/s)</span><span class="hint" data-i18n="zoom_hint">arraste para zoom · duplo clique volta</span></div>
         </div>
 
-        <div class="bars-grid">
-          <div>
-            <h3 data-i18n="landcover">Cobertura do solo (%)</h3>
-            <div id="d-cover" class="bars"></div>
-          </div>
-          <div>
-            <h3 data-i18n="soiltex">Textura do solo (%)</h3>
-            <div id="d-soil" class="bars"></div>
-          </div>
+        <div class="block">
+          <h3 data-i18n="landcover">Cobertura do solo</h3>
+          <div id="d-cover" class="stack"></div>
+          <h3 data-i18n="soiltex">Textura do solo</h3>
+          <div id="d-soil" class="stack"></div>
         </div>
 
-        <div class="detail-actions">
-          <button class="btn btn-primary" id="d-csv" type="button" data-i18n="dl_series">Baixar séries (CSV)</button>
-          <a class="btn btn-ghost" id="d-attr" href="#attributes" data-i18n="see_attr">Ver todos os atributos</a>
+        <div class="d-actions">
+          <button class="link" id="d-csv" type="button"><span data-i18n="dl_series">Baixar séries em CSV</span> ↓</button>
+          <a class="link" id="d-attr" href="#attributes"><span data-i18n="see_attr">Todos os atributos</span> →</a>
         </div>
-      </div>
+      </section>
     </aside>
+
+    <div class="map-wrap">
+      <div id="map" aria-label="Mapa das bacias"></div>
+      <div class="legend" id="legend">
+        <div class="legend-opts" id="colorby" role="radiogroup"></div>
+        <div id="legend-body"></div>
+      </div>
+    </div>
   </main>
 
   <!-- ATRIBUTOS -->
   <main id="view-attributes" class="view page" hidden>
     <div class="page-inner">
-      <h1 data-i18n="attr_title">Explorador de atributos</h1>
-      <p class="lead" data-i18n="attr_lead">Mais de 100 atributos em nove classes. Clique no cabeçalho para ordenar e em uma linha para ver a bacia no mapa.</p>
+      <header class="page-head">
+        <p class="kicker" data-i18n="attr_kicker">Atributos</p>
+        <h1 data-i18n="attr_title">Nove classes, 735 bacias</h1>
+        <p class="lede" data-i18n="attr_lead"></p>
+      </header>
       <div class="toolbar">
-        <div class="segmented" id="classes" role="tablist"></div>
+        <div class="classes" id="classes" role="tablist"></div>
         <div class="toolbar-right">
-          <input id="tfilter" type="search" data-i18n-ph="filter_ph" placeholder="Filtrar linhas">
-          <button class="btn btn-ghost" id="tcsv" type="button" data-i18n="dl_class">Baixar classe (CSV)</button>
+          <input id="tfilter" type="search" spellcheck="false" data-i18n-ph="filter_ph" placeholder="Filtrar">
+          <button class="link" id="tcsv" type="button"><span data-i18n="dl_class">CSV</span> ↓</button>
         </div>
       </div>
       <div class="table-wrap"><table id="table"></table></div>
@@ -106,36 +108,31 @@
   <!-- SOBRE -->
   <main id="view-about" class="view page" hidden>
     <div class="page-inner about">
+      <header class="page-head">
+        <p class="kicker" data-i18n="about_kicker">Sobre</p>
+        <h1 data-i18n="about_title">Um banco de dados de grande amostra para bacias brasileiras</h1>
+      </header>
       <div class="about-grid">
-        <section>
-          <div class="notice" data-i18n-html="v2_notice"></div>
-          <h1 data-i18n="about_title">Catchment Attributes for Brazil</h1>
-          <p data-i18n="about_p1"></p>
+        <div class="prose">
+          <p class="big" data-i18n="about_p1"></p>
           <p data-i18n="about_p2"></p>
-
-          <h2 data-i18n="classes_title">Classes de atributos</h2>
-          <ul class="chips" id="about-classes"></ul>
-
-          <h2 data-i18n="ref_title">Como citar</h2>
-          <blockquote class="ref">
-            Almagro, A., Oliveira, P. T. S., Meira Neto, A. A., Roy, T., and Troch, P.: CABra: a novel large-sample dataset for Brazilian catchments, <em>Hydrol. Earth Syst. Sci.</em>, 25, 3105–3135,
-            <a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener">https://doi.org/10.5194/hess-25-3105-2021</a>, 2021.
-          </blockquote>
-          <p><span data-i18n="data_doi">Dados:</span> <a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener">https://doi.org/10.5281/zenodo.4070146</a></p>
-
-          <h2 data-i18n="contact_title">Contato</h2>
-          <p data-i18n-html="contact_text"></p>
-        </section>
-        <section class="ack">
-          <img src="assets/img/logo_cabra_1st.png" alt="CABra" class="about-logo">
-          <h2 data-i18n="ack_title">Apoio</h2>
+          <div class="v2 v2-wide" data-i18n-html="v2_notice"></div>
+        </div>
+        <div class="side-notes">
+          <h3 data-i18n="ref_title">Como citar</h3>
+          <p class="ref">Almagro, A., Oliveira, P. T. S., Meira Neto, A. A., Roy, T., and Troch, P.: CABra: a novel large-sample dataset for Brazilian catchments, <em>Hydrol. Earth Syst. Sci.</em>, 25, 3105–3135, <a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener">doi:10.5194/hess-25-3105-2021</a>, 2021.</p>
+          <h3 data-i18n="data_doi">Dados</h3>
+          <p><a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener">doi:10.5281/zenodo.4070146</a></p>
+          <h3 data-i18n="contact_title">Contato</h3>
+          <p><a href="mailto:andre.almagro@gmail.com">andre.almagro@gmail.com</a></p>
+          <h3 data-i18n="ack_title">Apoio</h3>
           <div class="logos">
             <img src="assets/img/UFMS_logo.png" alt="UFMS">
             <img src="assets/img/UA_logo.png" alt="University of Arizona">
             <img src="assets/img/CAPES_logo.png" alt="CAPES">
             <img src="assets/img/HWS_logo.png" alt="HWS">
           </div>
-        </section>
+        </div>
       </div>
     </div>
   </main>

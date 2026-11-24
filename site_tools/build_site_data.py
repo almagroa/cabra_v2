@@ -8,6 +8,7 @@ Gera em docs/data/:
     catchments.json          resumo de cada bacia (mapa e painel)
     attributes.json          as 9 classes de atributos (colunas, unidades, linhas)
     boundaries/<id>.json     contorno simplificado de cada bacia (GeoJSON)
+    outlines.json            todos os contornos, bem simplificados (fundo do mapa)
     series/<id>.json         vazão e precipitação diárias de cada bacia
 
 Dependências: pandas, pyshp, shapely.
@@ -130,6 +131,26 @@ def main():
 
         gj = {"type": gj["type"], "coordinates": rnd(gj["coordinates"])}
         (OUT / "boundaries" / f"{c['id']}.json").write_text(json.dumps(gj, separators=(",", ":"), allow_nan=False))
+
+    # --- contornos de fundo (todas as bacias, das maiores para as menores) ----
+    feats = []
+    for c in catchments:
+        r = shapefile.Reader(str(SRC / "shapefiles" / f"CABra_{c['id']}.shp"))
+        g = shape(r.shape(0).__geo_interface__).simplify(0.02, preserve_topology=True)
+        feats.append((g.area, c["id"], mapping(g)))
+    feats.sort(key=lambda x: -x[0])
+
+    def rnd3(o):
+        if isinstance(o, (list, tuple)):
+            if o and isinstance(o[0], float):
+                return [round(v, 3) for v in o]
+            return [rnd3(v) for v in o]
+        return o
+
+    fc = {"type": "FeatureCollection", "features": [
+        {"type": "Feature", "properties": {"id": i}, "geometry": {"type": g["type"], "coordinates": rnd3(g["coordinates"])}}
+        for _, i, g in feats]}
+    (OUT / "outlines.json").write_text(json.dumps(fc, separators=(",", ":"), allow_nan=False))
 
     # --- séries ----------------------------------------------------------
     flow = pd.read_csv(SRC / "flows.csv")

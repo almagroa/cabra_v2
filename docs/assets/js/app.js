@@ -7,7 +7,7 @@
 
   // ------------------------------------------------------------------ idioma
   let lang = "pt";
-  try { lang = localStorage.getItem("cabra-lang") || (navigator.language || "pt").slice(0, 2); } catch (e) { /* sem storage */ }
+  try { lang = localStorage.getItem("cabra-lang") || ((navigator.language || "pt").startsWith("pt") ? "pt" : "en"); } catch (e) { /* sem storage */ }
   if (!I18N[lang]) lang = "en";
   const t = (k) => (I18N[lang][k] !== undefined ? I18N[lang][k] : k);
 
@@ -16,20 +16,23 @@
     document.querySelectorAll("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
     document.querySelectorAll("[data-i18n-html]").forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });
     document.querySelectorAll("[data-i18n-ph]").forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
-    $("#lang").textContent = lang === "pt" ? "EN" : "PT";
+    document.querySelectorAll(".lang button").forEach((b) => b.classList.toggle("on", b.dataset.lang === lang));
   }
-  $("#lang").addEventListener("click", () => {
-    lang = lang === "pt" ? "en" : "pt";
+  document.querySelectorAll(".lang button").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.lang === lang) return;
+    lang = b.dataset.lang;
     try { localStorage.setItem("cabra-lang", lang); } catch (e) { /* ok */ }
     applyLang();
     refreshAll();
-  });
+  }));
 
   // ------------------------------------------------------------------ formatos
-  const nf = (v, d = 0) => (v === null || v === undefined || v === "" ? "–"
-    : Number(v).toLocaleString(lang === "pt" ? "pt-BR" : "en-US", { maximumFractionDigits: d, minimumFractionDigits: 0 }));
+  const loc = () => (lang === "pt" ? "pt-BR" : "en-US");
+  const nf = (v, d = 0) => (v === null || v === undefined || v === "" || Number.isNaN(+v) ? "–"
+    : Number(v).toLocaleString(loc(), { maximumFractionDigits: d, minimumFractionDigits: d }));
   const biomeName = (b) => (t("biome")[b] || b);
   const hregName = (h) => h.replace(/([a-z])([A-Z])/g, "$1 $2");
+  const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 
   // ------------------------------------------------------------------ estado
   let catchments = [];
@@ -38,45 +41,55 @@
   let selected = null;
 
   // ------------------------------------------------------------------ mapa
-  const map = L.map("map", { zoomControl: false, preferCanvas: true, minZoom: 3 }).setView([-15, -54], 4);
-  L.control.zoom({ position: "topleft" }).addTo(map);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  const map = L.map("map", { zoomControl: false, preferCanvas: true, minZoom: 3 }).setView([-15, -52], 4);
+  L.control.zoom({ position: "topright" }).addTo(map);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: "abcd", maxZoom: 18,
+    subdomains: "abcd", maxZoom: 18, opacity: 0.9,
   }).addTo(map);
+  const canvas = L.canvas({ padding: 0.3 });
+  const outlineLayer = L.layerGroup().addTo(map);
   const pointsLayer = L.layerGroup().addTo(map);
   let boundaryLayer = null;
   const markers = new Map();
 
+  // paletas pensadas para fundo escuro
   const BIOME_COLORS = {
-    Amazon: "#1d7a3e", Atlanticforest: "#2b9e8f", Cerrado: "#d39b16",
-    Caatinga: "#c4553b", Pampa: "#7d6bc2", Pantanal: "#2f7fe0",
+    Amazon: "#4fae6f", Atlanticforest: "#69c3e0", Cerrado: "#d8b470",
+    Caatinga: "#c8643f", Pampa: "#a99be0", Pantanal: "#e7e3da",
   };
-  const RAMP = ["#0b3a9e", "#2f6fc0", "#4fa6c9", "#9fd2b8", "#f3d77a", "#e48b3b"];
+  const RAMPS = {
+    wet: ["#c8643f", "#d8b470", "#e7e3da", "#8fd0e4", "#3b8fc4"],
+    dry: ["#3b8fc4", "#8fd0e4", "#e7e3da", "#d8b470", "#c8643f"],
+    seq: ["#2a3b4a", "#3b6f8f", "#69c3e0", "#c5ecf6"],
+    hot: ["#2a3b4a", "#7a5a3a", "#d8b470", "#f3e1b5"],
+    green: ["#2a3b4a", "#2f6b4a", "#4fae6f", "#b9e3a8"],
+  };
   const VARIABLES = {
+    aridity: { key: "aridity", d: 2, ramp: "dry" },
+    prec: { key: "prec", d: 0, ramp: "wet", unit: "u_prec" },
+    qmean: { key: "qmean", d: 2, ramp: "seq", unit: "u_qmean" },
+    area: { key: "area", d: 0, ramp: "seq", unit: "u_area" },
+    hdi: { key: "hdi", d: 2, ramp: "hot" },
+    forest: { get: (c) => c.cover.forest, d: 0, ramp: "green", unit: "u_forest" },
     biome: { cat: true },
-    aridity: { key: "aridity", d: 2 },
-    prec: { key: "prec", d: 0 },
-    qmean: { key: "qmean", d: 2 },
-    area: { key: "area", d: 0 },
-    hdi: { key: "hdi", d: 2 },
-    forest: { get: (c) => c.cover.forest, d: 0 },
   };
-  let colorBy = "biome";
+  let colorBy = "aridity";
 
-  function rampColor(x) {
-    const n = RAMP.length - 1;
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  function rampColor(ramp, x) {
+    const n = ramp.length - 1;
     const i = Math.min(n - 1, Math.floor(x * n));
     const f = x * n - i;
-    const a = hex(RAMP[i]), b = hex(RAMP[i + 1]);
+    const a = hex(ramp[i]), b = hex(ramp[i + 1]);
     return `rgb(${a.map((v, k) => Math.round(v + (b[k] - v) * f)).join(",")})`;
   }
-  function hex(h) { return [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); }
 
   function colorFn() {
     const v = VARIABLES[colorBy];
-    if (v.cat) return { fn: (c) => BIOME_COLORS[c.biome] || "#888" };
+    if (v.cat) return { cat: true, fn: (c) => BIOME_COLORS[c.biome] || "#888" };
     const get = v.get || ((c) => c[v.key]);
+    const ramp = RAMPS[v.ramp];
     const vals = catchments.map(get).filter((x) => x !== null && !isNaN(x)).sort((a, b) => a - b);
     // cor pelo percentil: legível mesmo com distribuições muito assimétricas (ex.: área)
     const rank = (x) => {
@@ -85,7 +98,7 @@
       return lo / (vals.length - 1);
     };
     const q = (p) => vals[Math.round(p * (vals.length - 1))];
-    return { fn: (c) => (get(c) === null ? "#999" : rampColor(rank(get(c)))), q, d: v.d };
+    return { fn: (c) => (get(c) === null ? "#555" : rampColor(ramp, rank(get(c)))), q, d: v.d, ramp, unit: v.unit };
   }
 
   function drawPoints() {
@@ -94,9 +107,9 @@
     markers.clear();
     catchments.forEach((c) => {
       const m = L.circleMarker([c.lat, c.lon], {
-        radius: 5, weight: 1, color: "#fff", fillColor: cf.fn(c), fillOpacity: 0.9,
+        renderer: canvas, radius: 4, weight: 1, color: "#0e1114", fillColor: cf.fn(c), fillOpacity: 1,
       });
-      m.bindTooltip(`<b>${c.name}</b><br>CABra ${c.id} · ANA ${c.ana}`, { direction: "top", offset: [0, -4] });
+      m.bindTooltip(`<b>${esc(c.name)}</b> <span>${c.state} · ${c.id}</span>`, { direction: "top", offset: [0, -5] });
       m.on("click", () => go(`#map/${c.id}`));
       m.addTo(pointsLayer);
       markers.set(c.id, m);
@@ -105,39 +118,52 @@
     drawLegend(cf);
   }
 
-  function fitAll() {
-    const b = L.latLngBounds(catchments.map((c) => [c.lat, c.lon]));
-    const wide = window.innerWidth > 820;
-    map.fitBounds(b, wide ? { paddingTopLeft: [40, 40], paddingBottomRight: [Math.min(480, window.innerWidth * 0.45) + 20, 40] } : { padding: [16, 16] });
-  }
-
   function drawLegend(cf) {
-    const sel = $("#colorby");
-    sel.innerHTML = Object.keys(VARIABLES).map((k) => `<option value="${k}" ${k === colorBy ? "selected" : ""}>${t("v_" + k)}</option>`).join("");
+    $("#colorby").innerHTML = Object.keys(VARIABLES).map((k) =>
+      `<button type="button" role="radio" aria-checked="${k === colorBy}" data-k="${k}" class="${k === colorBy ? "on" : ""}">${t("v_" + k)}</button>`).join("");
     const body = $("#legend-body");
-    if (VARIABLES[colorBy].cat) {
-      const counts = {};
-      catchments.forEach((c) => { counts[c.biome] = (counts[c.biome] || 0) + 1; });
-      body.innerHTML = Object.keys(BIOME_COLORS).map((b) =>
-        `<div class="legend-item"><i style="background:${BIOME_COLORS[b]}"></i>${biomeName(b)} <span style="color:var(--muted);margin-left:auto">${counts[b] || 0}</span></div>`).join("");
+    if (cf.cat) {
+      body.innerHTML = `<div class="cats">${Object.keys(BIOME_COLORS).map((b) => `<span style="--c:${BIOME_COLORS[b]}">${biomeName(b)}</span>`).join("")}</div>`;
     } else {
-      body.innerHTML = `<div class="legend-ramp" style="background:linear-gradient(90deg,${RAMP.join(",")})"></div>
-        <div class="legend-scale"><span>${nf(cf.q(0), cf.d)}</span><span>${nf(cf.q(0.5), cf.d)}</span><span>${nf(cf.q(1), cf.d)}</span></div>
-        <div class="hint">${lang === "pt" ? "mín · mediana · máx" : "min · median · max"}</div>`;
+      const u = cf.unit ? ` ${t(cf.unit)}` : "";
+      body.innerHTML = `<div class="ramp" style="background:linear-gradient(90deg,${cf.ramp.join(",")})"></div>
+        <div class="scale"><span>${nf(cf.q(0), cf.d)}</span><span>${nf(cf.q(0.5), cf.d)}</span><span>${nf(cf.q(1), cf.d)}${u}</span></div>`;
     }
   }
-  $("#colorby").addEventListener("change", (e) => { colorBy = e.target.value; drawPoints(); });
+  $("#colorby").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    colorBy = b.dataset.k;
+    drawPoints();
+  });
 
   function highlight(id) {
-    markers.forEach((m, k) => m.setStyle(k === id ? { radius: 8, weight: 3, color: "#111" } : { radius: 5, weight: 1, color: "#fff" }));
+    markers.forEach((m, k) => m.setStyle(k === id ? { radius: 7, weight: 2, color: "#ece7dc" } : { radius: 4, weight: 1, color: "#0e1114" }));
     const m = markers.get(id);
     if (m) m.bringToFront();
   }
 
+  function fitAll() {
+    if (!catchments.length) return;
+    map.fitBounds(L.latLngBounds(catchments.map((c) => [c.lat, c.lon])), { padding: [30, 30] });
+  }
+
+  // contornos de todas as bacias como fundo (o próprio banco desenha o mapa)
+  D.outlines().then((fc) => {
+    const layer = L.geoJSON(fc, {
+      renderer: canvas, interactive: false,
+      style: { color: "#ece7dc", weight: 0.5, opacity: 0.22, fillColor: "#69c3e0", fillOpacity: 0.025 },
+    }).addTo(outlineLayer);
+    // os contornos de fundo são bem simplificados: somem aos poucos com o zoom
+    const fade = () => { const z = map.getZoom(); layer.setStyle({ opacity: z >= 8 ? 0.06 : z >= 6 ? 0.14 : 0.22 }); };
+    map.on("zoomend", fade);
+    fade();
+  }).catch(() => { /* opcional */ });
+
   // ------------------------------------------------------------------ busca
   const search = $("#search"), results = $("#search-results");
   let hits = [], hitIdx = 0;
-  const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const norm = (s) => String(s).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   search.addEventListener("input", () => {
     const q = norm(search.value.trim());
     if (!q) { results.hidden = true; return; }
@@ -155,14 +181,18 @@
   function renderHits() {
     results.hidden = hits.length === 0;
     results.innerHTML = hits.map((c, i) =>
-      `<li data-id="${c.id}" class="${i === hitIdx ? "on" : ""}">${c.name} <small>· ${c.state} · CABra ${c.id} · ANA ${c.ana}</small></li>`).join("");
+      `<li data-id="${c.id}" class="${i === hitIdx ? "on" : ""}"><span>${esc(c.name)}</span><small>${c.state} · ${c.ana}</small></li>`).join("");
   }
   results.addEventListener("mousedown", (e) => {
     const li = e.target.closest("li");
     if (li) pick(+li.dataset.id);
   });
-  function pick(id) { results.hidden = true; search.value = ""; go(`#map/${id}`); }
+  function pick(id) { results.hidden = true; search.value = ""; search.blur(); go(`#map/${id}`); }
   search.addEventListener("blur", () => setTimeout(() => { results.hidden = true; }, 150));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && selected && document.activeElement !== search) go("#map");
+    if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); search.focus(); }
+  });
 
   // ------------------------------------------------------------------ detalhe
   let plots = [];
@@ -174,107 +204,109 @@
     selected = c;
     $("#intro").hidden = true;
     $("#detail").hidden = false;
-    $("#side").scrollTop = 0;
+    $("#panel").scrollTop = 0;
+    $("#view-map").scrollTop = 0;
     renderDetail();
     highlight(id);
 
     const geom = await D.boundary(id);
     if (selected !== c) return;
     if (boundaryLayer) map.removeLayer(boundaryLayer);
-    boundaryLayer = L.geoJSON(geom, { style: { color: "#0b3a9e", weight: 2, fillColor: "#4fa6c9", fillOpacity: 0.18 }, interactive: false }).addTo(map);
-    const pad = window.innerWidth > 820 ? { paddingTopLeft: [40, 40], paddingBottomRight: [Math.min(480, window.innerWidth * 0.45) + 40, 40] } : { padding: [20, 20] };
-    map.fitBounds(boundaryLayer.getBounds(), { ...pad, maxZoom: 9 });
+    boundaryLayer = L.geoJSON(geom, {
+      style: { color: "#ece7dc", weight: 1.5, fillColor: "#69c3e0", fillOpacity: 0.14 }, interactive: false,
+    }).addTo(map);
+    map.flyToBounds(boundaryLayer.getBounds(), { padding: [40, 40], maxZoom: 9, duration: 0.6 });
     loadSeries(c);
+  }
+
+  const COVER_COLORS = { forest: "#4fae6f", grass: "#b9d77a", shrub: "#8a9a5b", crops: "#d8b470", urban: "#9aa1a8", waterp: "#69c3e0", bare: "#c8643f", other: "#3a4148" };
+  const SOIL_COLORS = { sand: "#e4c88f", silt: "#b08a5c", clay: "#7a4e33" };
+
+  function stack(parts, colors, label) {
+    const bar = parts.map(([k, v]) => `<i style="width:${v}%;background:${colors[k]}" title="${label(k)} ${nf(v, 0)}%"></i>`).join("");
+    const li = parts.filter(([, v]) => v >= 0.5).map(([k, v]) => `<li style="--c:${colors[k]}">${label(k)}<b>${nf(v, 0)}%</b></li>`).join("");
+    return `<div class="bar">${bar}</div><ul>${li}</ul>`;
   }
 
   function renderDetail() {
     const c = selected;
     if (!c) return;
-    $("#d-eyebrow").textContent = `CABra ${c.id} · ${c.state}`;
+    $("#d-kicker").textContent = `CABra ${String(c.id).padStart(3, "0")} · ${c.state} · ${biomeName(c.biome)}`;
     $("#d-name").textContent = c.name;
+    $("#d-sub").textContent = `${hregName(c.hreg)} · ${nf(c.lat, 3)}°, ${nf(c.lon, 3)}°`;
     const facts = [
-      ["f_ana", c.ana], ["f_biome", biomeName(c.biome)],
-      ["f_hreg", hregName(c.hreg)], ["f_area", `${nf(c.area)} km²`],
-      ["f_elev", `${nf(c.elev)} m`], ["f_prec", `${nf(c.prec)} mm`],
-      ["f_qmean", `${nf(c.qmean, 2)} mm/${lang === "pt" ? "dia" : "day"}`], ["f_aridity", nf(c.aridity, 2)],
-      ["f_hdi", nf(c.hdi, 2)], ["f_missing", `${nf(c.missing, 1)} %`],
+      ["f_ana", c.ana, ""], ["f_area", nf(c.area), "km²"],
+      ["f_prec", nf(c.prec), t("u_prec")], ["f_qmean", nf(c.qmean, 2), t("u_qmean")],
+      ["f_aridity", nf(c.aridity, 2), ""], ["f_elev", nf(c.elev), "m"],
+      ["f_hdi", nf(c.hdi, 2), ""], ["f_missing", nf(c.missing, 1), "%"],
     ];
-    $("#d-facts").innerHTML = facts.map(([k, v]) => `<div><dt>${t(k)}</dt><dd>${v}</dd></div>`).join("");
-    const coverColors = { forest: "#1d7a3e", grass: "#9cc65a", shrub: "#c9b458", crops: "#e8a33d", urban: "#8a8f98", waterp: "#2f7fe0", bare: "#c9a27e" };
-    $("#d-cover").innerHTML = Object.entries(c.cover).filter(([, v]) => v !== null)
-      .sort((a, b) => b[1] - a[1]).slice(0, 5)
-      .map(([k, v]) => bar(t("c_" + k), v, coverColors[k])).join("");
-    const soilColors = { sand: "#e6b77e", silt: "#b98b5e", clay: "#8a5a3b" };
-    $("#d-soil").innerHTML = Object.entries(c.soil).map(([k, v]) => bar(t("s_" + k), v, soilColors[k])).join("");
-    $("#d-attr").href = `#attributes`;
-  }
-  const bar = (label, v, color) =>
-    `<div class="bar"><span>${label}</span><div class="track"><div class="fill" style="width:${Math.max(0, Math.min(100, v))}%;background:${color}"></div></div><span class="val">${nf(v, 0)}</span></div>`;
+    $("#d-facts").innerHTML = facts.map(([k, v, u]) => `<div><dt>${t(k)}</dt><dd>${v}${u ? `<small>${u}</small>` : ""}</dd></div>`).join("");
 
-  async function loadSeries(c) {
-    const token = ++seriesToken;
-    plots.forEach((p) => p.destroy());
-    plots = [];
-    ["#chart-p", "#chart-q"].forEach((s) => { const el = $(s); el.innerHTML = ""; el.classList.add("loading"); el.dataset.loading = t("loading"); });
-    const s = await D.series(c.id);
-    if (token !== seriesToken) return;
-    ["#chart-p", "#chart-q"].forEach((sel) => $(sel).classList.remove("loading"));
-    plots = [
-      timePlot($("#chart-p"), s.p, "#2f7fe0", true),
-      timePlot($("#chart-q"), s.q, "#0b3a9e", false),
-    ];
+    const cov = Object.entries(c.cover).filter(([, v]) => v !== null).sort((a, b) => b[1] - a[1]);
+    const rest = Math.max(0, 100 - cov.reduce((s, [, v]) => s + v, 0));
+    if (rest >= 0.5) cov.push(["other", rest]);
+    $("#d-cover").innerHTML = stack(cov, COVER_COLORS, (k) => t("c_" + k));
+    const tot = (c.soil.sand || 0) + (c.soil.silt || 0) + (c.soil.clay || 0) || 1;
+    $("#d-soil").innerHTML = stack(["sand", "silt", "clay"].map((k) => [k, (c.soil[k] || 0) * 100 / tot]), SOIL_COLORS, (k) => t("s_" + k));
   }
 
   // mesmo eixo de tempo nos dois gráficos (período completo da v1)
   const X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
 
-  function dayStamps(start, n) {
-    const t0 = Date.parse(start + "T00:00:00Z") / 1000;
-    const xs = new Float64Array(n);
-    for (let i = 0; i < n; i++) xs[i] = t0 + i * 86400;
-    return xs;
+  async function loadSeries(c) {
+    const token = ++seriesToken;
+    plots.forEach((p) => p.destroy());
+    plots = [];
+    ["#chart-p", "#chart-q"].forEach((s) => { const el = $(s); el.classList.add("loading"); el.textContent = t("loading"); });
+    const s = await D.series(c.id);
+    if (token !== seriesToken) return;
+    ["#chart-p", "#chart-q"].forEach((sel) => { const el = $(sel); el.classList.remove("loading"); el.textContent = ""; });
+    plots = [
+      timePlot($("#chart-p"), s.p, { color: "#69c3e0", bars: true, height: 92, invert: true, xAxis: false }),
+      timePlot($("#chart-q"), s.q, { color: "#ece7dc", bars: false, height: 132, invert: false, xAxis: true }),
+    ];
   }
 
-  function timePlot(el, s, color, bars) {
-    const xs = dayStamps(s.start, s.values.length);
-    const w = el.clientWidth || 400;
+  function timePlot(el, s, o) {
+    const n = s.values.length;
+    const t0 = Date.parse(s.start + "T00:00:00Z") / 1000;
+    const xs = new Float64Array(n);
+    for (let i = 0; i < n; i++) xs[i] = t0 + i * 86400;
+    const axis = { stroke: "#8d949b", grid: { stroke: "#20262c", width: 1 }, ticks: { show: false }, font: "10.5px 'Plex Mono', monospace", gap: 4 };
     const opts = {
-      width: w, height: 150, tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
+      width: el.clientWidth || 380, height: o.height, padding: [8, 4, 0, 0],
+      tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
       legend: { show: false },
-      cursor: { drag: { x: true, y: false }, points: { show: false }, sync: { key: "cabra" } },
-      scales: { x: { time: true, range: (u, mn, mx) => [mn, mx] }, y: { range: (u, mn, mx) => [0, mx * 1.05 || 1] } },
+      cursor: { drag: { x: true, y: false, setScale: false }, points: { show: false }, sync: { key: "cabra" }, y: false },
+      scales: { x: { time: true, range: (u, mn, mx) => [mn, mx] }, y: { dir: o.invert ? -1 : 1, range: (u, mn, mx) => [0, (mx || 1) * 1.05] } },
       axes: [
-        { stroke: "#5b6776", grid: { stroke: "#eef1f5" }, ticks: { stroke: "#e3e7ee" }, font: "11px system-ui" },
-        { stroke: "#5b6776", grid: { stroke: "#eef1f5" }, ticks: { stroke: "#e3e7ee" }, font: "11px system-ui", size: 48 },
+        Object.assign({}, axis, { show: o.xAxis, size: 26 }),
+        Object.assign({}, axis, { size: 44, values: (u, vs) => vs.map((v) => nf(v, 0)) }),
       ],
       series: [
-        { label: lang === "pt" ? "Data" : "Date", value: "{YYYY}-{MM}-{DD}" },
+        {},
         {
-          label: s.unit, stroke: color, width: 1, fill: bars ? color : color + "22",
-          paths: bars ? uPlot.paths.bars({ size: [1, 2], gap: 0 }) : undefined,
-          value: (u, v) => (v === null ? "–" : nf(v, 2)),
+          stroke: o.color, width: o.bars ? 0 : 1, fill: o.bars ? o.color + "aa" : "rgba(236,231,220,.06)",
+          paths: o.bars ? uPlot.paths.bars({ size: [1, 3], gap: 0 }) : undefined,
         },
       ],
+      hooks: {
+        setSelect: [(u) => {
+          if (u.select.width < 4) return;
+          const min = u.posToVal(u.select.left, "x"), max = u.posToVal(u.select.left + u.select.width, "x");
+          plots.forEach((p) => p.batch(() => { p.setScale("x", { min, max }); p.setSelect({ width: 0, height: 0 }, false); }));
+        }],
+      },
     };
-    opts.hooks = {
-      setSelect: [(u) => {
-        if (u.select.width < 4) return;
-        const min = u.posToVal(u.select.left, "x"), max = u.posToVal(u.select.left + u.select.width, "x");
-        plots.forEach((p) => { p.batch(() => { p.setScale("x", { min, max }); p.setSelect({ width: 0, height: 0 }, false); }); });
-      }],
-    };
-    opts.cursor.drag.setScale = false;
     const u = new uPlot(opts, [xs, s.values], el);
     u.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] });
     u.over.addEventListener("dblclick", () => plots.forEach((p) => p.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] })));
     u._el = el;
+    u._h = o.height;
     return u;
   }
 
-  window.addEventListener("resize", () => {
-    plots.forEach((p) => p.setSize({ width: p._el.clientWidth, height: 150 }));
-  });
-
+  window.addEventListener("resize", () => plots.forEach((p) => p.setSize({ width: p._el.clientWidth, height: p._h })));
   $("#d-close").addEventListener("click", () => go("#map"));
 
   function clearSelection() {
@@ -285,7 +317,7 @@
     if (boundaryLayer) { map.removeLayer(boundaryLayer); boundaryLayer = null; }
     $("#detail").hidden = true;
     $("#intro").hidden = false;
-    markers.forEach((m) => m.setStyle({ radius: 5, weight: 1, color: "#fff" }));
+    highlight(-1);
   }
 
   $("#d-csv").addEventListener("click", async () => {
@@ -303,7 +335,7 @@
     };
     add(s.p, "p");
     add(s.q, "q");
-    const lines = [`date,precipitation_mm,streamflow_m3s`];
+    const lines = ["date,precipitation_mm,streamflow_m3s"];
     [...rows.keys()].sort().forEach((d) => {
       const r = rows.get(d);
       lines.push(`${d},${r.p ?? ""},${r.q ?? ""}`);
@@ -325,13 +357,11 @@
   let tClass = "general", tSort = { col: 0, dir: 1 }, tFilter = "";
 
   function renderClasses() {
-    $("#classes").innerHTML = CLASS_KEYS.map((k) => `<button type="button" data-k="${k}" class="${k === tClass ? "on" : ""}">${t("cls_" + k)}</button>`).join("");
-    $("#about-classes").innerHTML = CLASS_KEYS.map((k) => `<li>${t("cls_" + k)}</li>`).join("");
+    $("#classes").innerHTML = CLASS_KEYS.map((k) => `<button type="button" role="tab" data-k="${k}" class="${k === tClass ? "on" : ""}">${t("cls_" + k)}</button>`).join("");
   }
   $("#classes").addEventListener("click", (e) => {
     const b = e.target.closest("button");
-    if (!b) return;
-    go(`#attributes/${b.dataset.k}`);
+    if (b) go(`#attributes/${b.dataset.k}`);
   });
   $("#tfilter").addEventListener("input", (e) => { tFilter = norm(e.target.value.trim()); renderTable(); });
 
@@ -339,7 +369,7 @@
     if (!attributes) return;
     const a = attributes[tClass];
     let rows = a.rows;
-    if (tFilter) rows = rows.filter((r) => r.some((v) => v !== null && norm(String(v)).includes(tFilter)));
+    if (tFilter) rows = rows.filter((r) => r.some((v) => v !== null && norm(v).includes(tFilter)));
     const { col, dir } = tSort;
     rows = [...rows].sort((x, y) => {
       const a1 = x[col], b1 = y[col];
@@ -348,13 +378,12 @@
       return (typeof a1 === "number" && typeof b1 === "number" ? a1 - b1 : String(a1).localeCompare(String(b1))) * dir;
     });
     const head = a.columns.map((c, i) =>
-      `<th data-i="${i}" class="${i === col ? "sorted" : ""}">${c}${i === col ? (dir > 0 ? " ↑" : " ↓") : ""}<small>${a.units[i] || "&nbsp;"}</small></th>`).join("");
+      `<th data-i="${i}" class="${i === col ? "sorted" : ""}">${esc(c)}${i === col ? (dir > 0 ? " ↑" : " ↓") : ""}<small>${a.units[i] ? esc(a.units[i]) : "&nbsp;"}</small></th>`).join("");
     const body = rows.map((r) =>
-      `<tr data-id="${r[0]}">${r.map((v) => `<td class="${typeof v === "string" ? "txt" : ""}">${v === null ? "–" : (typeof v === "number" ? v : esc(v))}</td>`).join("")}</tr>`).join("");
+      `<tr data-id="${r[0]}">${r.map((v) => `<td class="${typeof v === "string" ? "txt" : ""}">${v === null ? "–" : esc(v)}</td>`).join("")}</tr>`).join("");
     $("#table").innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
     $("#tcount").textContent = t("rows_shown")(rows.length, a.rows.length);
   }
-  const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   $("#table").addEventListener("click", (e) => {
     const th = e.target.closest("th");
     if (th) {
@@ -380,7 +409,7 @@
     const [view, arg] = (location.hash.slice(1) || "map").split("/");
     const v = ["map", "attributes", "about"].includes(view) ? view : "map";
     document.querySelectorAll(".view").forEach((el) => { el.hidden = el.id !== `view-${v}`; });
-    document.querySelectorAll(".tabs a").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
+    document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
     if (v === "map") {
       map.invalidateSize();
       if (arg && byId.has(+arg)) { if (!selected || selected.id !== +arg) select(+arg); }
@@ -394,16 +423,8 @@
   }
   window.addEventListener("hashchange", route);
 
-  function renderStats() {
-    const nAttr = attributes ? CLASS_KEYS.reduce((s, k) => s + attributes[k].columns.length - 2, 0) : 100;
-    $("#stats").innerHTML = [
-      [catchments.length, t("st_catch")], [30, t("st_years")], [9, t("st_classes")], [nAttr, t("st_attr")],
-    ].map(([n, l]) => `<div class="stat"><b>${nf(n)}</b><span>${l}</span></div>`).join("");
-  }
-
   function refreshAll() {
     drawPoints();
-    renderStats();
     renderClasses();
     renderTable();
     if (selected) { renderDetail(); loadSeries(selected); }
@@ -417,10 +438,9 @@
     byId = new Map(cs.map((c) => [c.id, c]));
     attributes = at;
     drawPoints();
-    renderStats();
     if (!location.hash.startsWith("#map/")) fitAll();
     route();
   }).catch((err) => {
-    $("#intro").innerHTML += `<p style="color:#b00">Erro ao carregar dados: ${esc(err.message)}</p>`;
+    $("#intro").insertAdjacentHTML("beforeend", `<p style="color:#c8643f">Erro ao carregar dados: ${esc(err.message)}</p>`);
   });
 })();
