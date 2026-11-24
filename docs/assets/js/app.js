@@ -68,7 +68,7 @@
   let selected = null, stateF = "", areaSel = null, areaLayer = null;
 
   // ------------------------------------------------------------------ mapa
-  const map = L.map("leaflet-map", { zoomControl: true, preferCanvas: true, minZoom: 3, attributionControl: true }).setView([-15, -52], 4);
+  const map = L.map("leaflet-map", { zoomControl: true, preferCanvas: true, minZoom: 3, zoomSnap: 0.25, zoomDelta: 0.5, attributionControl: true }).setView([-15, -52], 4);
   let base = null;
   function setBase() {
     if (base) map.removeLayer(base);
@@ -353,7 +353,6 @@
   function clearSelection() {
     selected = null; seriesToken++; destroyPlot();
     if (boundaryLayer) { map.removeLayer(boundaryLayer); boundaryLayer = null; }
-    $("#list-panel").hidden = false;
     $("#chart-panel").hidden = true;
     $("#attr-panel").hidden = true;
     $(".grid2").classList.remove("sel");

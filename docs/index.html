@@ -65,8 +65,8 @@
           <input type="file" id="area-file" accept=".geojson,.json,.kml,application/geo+json,application/vnd.google-earth.kml+xml" hidden>
         </div>
 
-        <!-- sem bacia: lista; com bacia: gráficos -->
-        <div class="panel" id="list-panel">
+        <!-- com bacia selecionada: gráficos ao lado do mapa (a lista fica oculta; a busca é pelo seletor do topo) -->
+        <div class="panel" id="list-panel" hidden>
           <header><h2 data-i18n="list_title">Bacias</h2><p id="list-sub"></p></header>
           <input id="search" class="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar por nome, código ANA ou ID">
           <div class="list" id="list"></div>

@@ -8,7 +8,7 @@ window.CABRA_I18N = {
     crumb_map: "Explorar", title_map: "Mapa e bacias", crumb_attr: "Explorar", title_attr: "Tabela de atributos", crumb_about: "Projeto", title_about: "Sobre o CABra",
     all_basins: "Selecione uma bacia…",
     theme_dark: "Usar tema escuro", theme_light: "Usar tema claro",
-    k_basins: "Bacias", k_basins_n: (s, b) => `${s} ${s === 1 ? "estado" : "estados"}, ${b} ${b === 1 ? "bioma" : "biomas"}`, k_period: "Período", k_period_n: "vazão diária; atributos de 1980–2010",
+    k_basins: "Bacias", k_basins_n: (s, b) => `${s} ${s === 1 ? "estado" : "estados"}, ${b} ${b === 1 ? "bioma" : "biomas"}`, k_period: "Período", k_period_n: "séries diárias; atributos de 1980–2010",
     k_area_max: "Maior bacia", k_qmean: "Vazão média", k_attr: "Atributos", k_attr_n: "em 9 classes",
     pop_head: "Atributos da bacia", pop_close: "Fechar", pop_missing: "Falhas", pop_elev: "Altitude média", pop_biome: "Bioma", pop_ana: "Código ANA", pop_vs: "▏ média das 735 bacias",
     area_rect: "Selecionar bacias com um retângulo", area_poly: "Enviar polígono (GeoJSON ou KML) para selecionar bacias",
