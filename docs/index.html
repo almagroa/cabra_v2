@@ -2,196 +2,154 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>CABra · Catchment Attributes for Brazil</title>
   <meta name="description" content="CABra: banco de dados de grande amostra com atributos hidrológicos, climáticos e fisiográficos de 735 bacias brasileiras.">
-  <meta name="theme-color" content="#050d1f">
   <link rel="icon" type="image/png" href="assets/img/logo_cabra_mark.png">
-  <link rel="preload" href="assets/vendor/fonts/exo-2-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="assets/vendor/fonts/exo-2-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+  <script>try{var t=localStorage.getItem("cabra-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
   <link rel="stylesheet" href="assets/vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="assets/vendor/uplot/uPlot.min.css">
   <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
-  <header class="barra">
-    <div class="barra-in">
-      <div class="barra-marca">
-        <a href="#map" aria-label="CABra"><img src="assets/img/logo_cabra_mark.png" alt="" width="46" height="44"></a>
-        <a class="barra-prod" href="#map">CABra <span data-i18n="brand_sub">Catchment Attributes for Brazil</span></a>
+<div class="app">
+  <!-- barra lateral -->
+  <aside class="side" id="side" aria-label="Navegação">
+    <a class="brand" href="#map">
+      <img src="assets/img/logo_cabra_mark.png" alt="" width="44" height="44">
+      <span><b>CABra</b><small>Catchment Attributes for Brazil</small></span>
+    </a>
+    <button type="button" class="menu-btn" id="menu-btn" aria-expanded="false" data-i18n="menu">Menu</button>
+    <nav class="navgrp"><h4 data-i18n="g_explore">Explorar</h4>
+      <a class="nav" href="#map" data-view="map"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M1.5 4 5.5 2l5 2 4-2v10l-4 2-5-2-4 2zM5.5 2v10M10.5 4v10" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span data-i18n="nav_map">Mapa e bacias</span></a>
+      <a class="nav" href="#attributes" data-view="attributes"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M2 2h12v12H2zM2 6h12M2 10h12M6 6v8" fill="none" stroke="currentColor" stroke-width="1.3"/></svg><span data-i18n="nav_attr">Tabela de atributos</span></a>
+    </nav>
+    <nav class="navgrp"><h4 data-i18n="g_data">Dados</h4>
+      <a class="nav" href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2v8m0 0L5 7m3 3 3-3M2.5 13.5h11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="nav_zenodo">Download (Zenodo)</span><span class="tag">↗</span></a>
+      <a class="nav" href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3.5 1.5h6l3 3v10h-9zM9.5 1.5v3h3M5.5 8.5h5M5.5 11h5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span data-i18n="nav_paper">Artigo (HESS)</span><span class="tag">↗</span></a>
+      <a class="nav" href="https://github.com/almagroa/cabra_v2" target="_blank" rel="noopener"><svg width="16" height="16" viewBox="0 0 16 16"><path d="M5.5 4 2 8l3.5 4M10.5 4 14 8l-3.5 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg><span>GitHub</span><span class="tag">↗</span></a>
+    </nav>
+    <nav class="navgrp"><h4 data-i18n="g_about">Projeto</h4>
+      <a class="nav" href="#about" data-view="about"><svg width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 7v4M8 4.8v.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg><span data-i18n="nav_about">Sobre o CABra</span></a>
+    </nav>
+    <div class="foot"><span class="ver" data-i18n="side_ver">Versão 1 · 1980–2010</span><span data-i18n="side_v2">v2 (até 2025) em preparação</span></div>
+  </aside>
+
+  <main>
+    <!-- barra de contexto -->
+    <div class="ctx">
+      <div><div class="crumb" id="crumb"></div><h1 id="title"></h1></div>
+      <div class="grow"></div>
+      <div class="picker" id="picker">
+        <select id="f-state" aria-label="Estado"></select>
+        <select id="basinSel" aria-label="Bacia"></select>
       </div>
-      <nav class="barra-acoes" aria-label="Seções">
-        <a href="#map" data-view="map" data-i18n="nav_map">Mapa</a>
-        <a href="#attributes" data-view="attributes" data-i18n="nav_attr">Atributos</a>
-        <a href="#about" data-view="about" data-i18n="nav_about">Sobre</a>
-        <div class="lang" role="group" aria-label="Idioma"><button type="button" data-lang="pt">PT</button><button type="button" data-lang="en">EN</button></div>
-        <a class="btn btn-p" href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener" data-i18n="download_all">Baixar dados</a>
-      </nav>
+      <div class="lang" role="group" aria-label="Idioma"><button type="button" data-lang="pt">PT</button><button type="button" data-lang="en">EN</button></div>
+      <button class="theme-t" id="theme-t" type="button"></button>
     </div>
-  </header>
 
-  <!-- ===================== MAPA ===================== -->
-  <main id="view-map" class="view">
-    <div class="painel">
-      <!-- coluna esquerda -->
-      <section class="col col-esq" id="col-esq">
-        <h3 class="rotulo-sec" data-i18n="select_title">Seleção de bacia</h3>
-        <div class="busca">
-          <svg class="busca-ic" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          <input id="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar por código ANA, nome, ID CABra ou estado">
-          <ul id="search-results" class="busca-res" hidden></ul>
-        </div>
-        <div class="filtros">
-          <select id="f-state" class="custom-select"></select>
-          <select id="f-biome" class="custom-select"></select>
+    <!-- ============ MAPA ============ -->
+    <section id="view-map" class="page view">
+      <div class="kpis plain five" id="kpis"></div>
+
+      <div class="grid2">
+        <div class="panel">
+          <header>
+            <h2 id="map-title"></h2><p id="map-sub"></p>
+            <div class="seg" id="colorby" role="group"></div>
+          </header>
+          <div class="map-wrap chart"><div id="leaflet-map" class="map-box" aria-label="Mapa das bacias"></div><span class="map-stamp" id="map-stamp"></span></div>
+          <div class="legend" id="legend"></div>
         </div>
 
-        <div id="intro">
-          <div class="hero">
-            <div class="hero-top">
-              <div class="hero-ic"><svg viewBox="0 0 24 24" width="30" height="30" aria-hidden="true"><path d="M12 2.7S5.5 10 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10 12 2.7 12 2.7Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></div>
-              <div>
-                <h2 data-i18n="hero_title">Atributos e séries hidrológicas de 735 bacias brasileiras</h2>
-                <p data-i18n="hero_text"></p>
-              </div>
-            </div>
-            <div class="hero-btns">
-              <a class="btn btn-p" href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="hero_btn1">Baixar o CABra</span></a>
-              <a class="btn btn-o" href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg><span data-i18n="hero_btn2">Ler o artigo</span></a>
-            </div>
-            <div class="hero-selos">
-              <span data-i18n="seal1">Dados abertos</span><span data-i18n="seal2">735 bacias · 1980–2010</span><span data-i18n="seal3">Mais de 80 atributos</span>
-            </div>
+        <!-- lista (sem bacia) ou atributos (com bacia) -->
+        <div class="panel" id="side-panel">
+          <div id="list-box">
+            <header><h2 data-i18n="list_title">Bacias</h2><p id="list-sub"></p></header>
+            <input id="search" class="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar por nome, código ANA ou ID">
+            <div class="list" id="list"></div>
           </div>
-          <div class="nota-v2" data-i18n-html="v2_notice"></div>
-          <p class="dica" data-i18n="intro_how"></p>
-        </div>
-
-        <div id="detail" hidden>
-          <div class="est-head">
-            <h2 id="d-name"></h2>
-            <button class="fechar" id="d-close" type="button" aria-label="Fechar">×</button>
+          <div id="attr-box" hidden>
+            <header>
+              <h2 data-i18n="attr_basin">Atributos da bacia</h2>
+              <button class="btn" id="d-close" type="button" data-i18n="clear_sel">Limpar seleção</button>
+            </header>
+            <div class="seg wide" id="d-tabs" role="group"></div>
+            <div id="d-tab-body"></div>
+            <p class="note" data-i18n="disclaimer"></p>
           </div>
-          <div class="est-meta" id="d-meta"></div>
-
-          <ul class="tab-list" id="d-tabs" role="tablist"></ul>
-          <div id="d-tab-body"></div>
-          <p class="aviso" data-i18n="disclaimer"></p>
         </div>
-      </section>
-
-      <!-- coluna direita -->
-      <section class="col col-dir">
-        <div class="mapa-box">
-          <div id="leaflet-map" aria-label="Mapa das bacias"></div>
-          <div class="mapa-leg">
-            <label for="colorby" data-i18n="color_by">Colorir por</label>
-            <select id="colorby" class="custom-select"></select>
-            <div id="legend-body"></div>
-          </div>
-          <p class="mapa-dica" data-i18n="map_hint">Clique em um ponto para ver os detalhes da bacia</p>
-        </div>
-
-        <div class="grafico" id="grafico">
-          <div class="grafico-top">
-            <div class="seg" id="chart-modes">
-              <button type="button" data-mode="q" class="on"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 17l5-6 4 3 4-7 5 8" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg><span data-i18n="m_q">Hidrograma</span></button>
-              <button type="button" data-mode="p"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M5 20V9M10 20V4M15 20v-8M20 20v-5" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span data-i18n="m_p">Precipitação</span></button>
-              <button type="button" data-mode="fdc"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 4c2 9 6 13 16 15M4 20h16M4 4v16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span data-i18n="m_fdc">Curva de permanência</span></button>
-            </div>
-            <div class="periodo"><span data-i18n="period">Período</span> <b id="period">01/01/1980 – 31/12/2010</b></div>
-          </div>
-          <div class="grafico-tit" id="chart-title"></div>
-          <div class="chart-wrapper" id="chart"><div class="vazio" data-i18n="chart_empty">Selecione uma bacia no mapa para ver as séries diárias.</div></div>
-          <p class="dica" id="chart-hint" data-i18n="zoom_hint" hidden></p>
-        </div>
-
-        <div class="baixar">
-          <button class="btn btn-o" id="d-csv" type="button" disabled><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="dl_series">Baixar dados</span></button>
-          <p data-i18n="dl_note">Séries diárias de precipitação e vazão da bacia selecionada, em CSV.</p>
-          <p class="sep" data-i18n="as_is">Os dados são fornecidos como estão, para fins de pesquisa. Cite o artigo ao usar.</p>
-        </div>
-      </section>
-    </div>
-  </main>
-
-  <!-- ===================== ATRIBUTOS ===================== -->
-  <main id="view-attributes" class="view pagina" hidden>
-    <div class="pagina-in">
-      <h1 data-i18n="attr_title">Explorador de atributos</h1>
-      <p class="lead" data-i18n="attr_lead"></p>
-      <ul class="tab-list" id="classes" role="tablist"></ul>
-      <div class="card">
-        <div class="card-top">
-          <input id="tfilter" class="campo" type="search" spellcheck="false" data-i18n-ph="filter_ph" placeholder="Filtrar linhas">
-          <span class="dica" id="tcount"></span>
-          <button class="btn btn-o btn-sm" id="tcsv" type="button" data-i18n="dl_class">Baixar CSV</button>
-        </div>
-        <div class="table-wrap"><table id="table"></table></div>
       </div>
-    </div>
-  </main>
 
-  <!-- ===================== SOBRE ===================== -->
-  <main id="view-about" class="view pagina" hidden>
-    <div class="pagina-in">
-      <h1 data-i18n="about_title">Sobre o CABra</h1>
-      <div class="sobre-grid">
-        <div class="card card-pad">
-          <p class="lead-forte" data-i18n="about_p1"></p>
+      <div class="panel" id="chart-panel">
+        <header>
+          <h2 data-i18n="series_title">Séries diárias</h2><p id="series-sub"></p>
+          <div class="seg" id="chart-modes" role="group">
+            <button type="button" data-mode="q" aria-pressed="true" data-i18n="m_q">Hidrograma</button>
+            <button type="button" data-mode="p" aria-pressed="false" data-i18n="m_p">Precipitação</button>
+            <button type="button" data-mode="fdc" aria-pressed="false" data-i18n="m_fdc">Curva de permanência</button>
+          </div>
+          <button class="btn dl" id="d-csv" type="button" disabled data-i18n="dl_series">Baixar CSV</button>
+        </header>
+        <div class="chart sm" id="chart"><div class="loading" data-i18n="chart_empty">Selecione uma bacia no mapa, na lista ou no seletor acima.</div></div>
+        <p class="note" id="chart-hint" data-i18n="zoom_hint" hidden></p>
+      </div>
+    </section>
+
+    <!-- ============ ATRIBUTOS ============ -->
+    <section id="view-attributes" class="page view" hidden>
+      <div class="panel">
+        <header>
+          <h2 id="tbl-title"></h2><p id="tcount"></p>
+          <input id="tfilter" class="search inline" type="search" spellcheck="false" data-i18n-ph="filter_ph" placeholder="Filtrar">
+          <button class="btn" id="tcsv" type="button" data-i18n="dl_class">Baixar CSV</button>
+        </header>
+        <div class="seg wide" id="classes" role="group"></div>
+        <div class="tbl" id="tbl"><table id="table"></table></div>
+      </div>
+    </section>
+
+    <!-- ============ SOBRE ============ -->
+    <section id="view-about" class="page view" hidden>
+      <div class="grid2">
+        <div class="panel prose">
+          <header><h2 data-i18n="about_h">O que é o CABra</h2></header>
+          <p data-i18n="about_p1"></p>
           <p data-i18n="about_p2"></p>
-          <div class="nota-v2" data-i18n-html="v2_notice"></div>
+          <p class="proto" data-i18n-html="v2_notice"></p>
           <h3 data-i18n="classes_title">Classes de atributos</h3>
-          <ul class="chips" id="about-classes"></ul>
+          <div class="btns" id="about-classes"></div>
         </div>
-        <div class="sobre-lado">
-          <div class="card card-pad">
-            <h3 data-i18n="ref_title">Como citar</h3>
-            <p class="ref">Almagro, A., Oliveira, P. T. S., Meira Neto, A. A., Roy, T., and Troch, P.: CABra: a novel large-sample dataset for Brazilian catchments, <em>Hydrol. Earth Syst. Sci.</em>, 25, 3105–3135, <a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener">https://doi.org/10.5194/hess-25-3105-2021</a>, 2021.</p>
-            <h3 data-i18n="data_doi">Dados</h3>
-            <p><a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener">https://doi.org/10.5281/zenodo.4070146</a></p>
-            <h3 data-i18n="contact_title">Contato</h3>
-            <p><a href="mailto:andre.almagro@gmail.com">andre.almagro@gmail.com</a></p>
-          </div>
-          <div class="card card-pad">
-            <h3 data-i18n="ack_title">Apoio</h3>
-            <div class="logos">
-              <img src="assets/img/UFMS_logo.png" alt="UFMS">
-              <img src="assets/img/UA_logo.png" alt="University of Arizona">
-              <img src="assets/img/CAPES_logo.png" alt="CAPES">
-              <img src="assets/img/HWS_logo.png" alt="HWS">
-            </div>
+        <div class="panel prose">
+          <header><h2 data-i18n="ref_title">Como citar</h2></header>
+          <p>Almagro, A., Oliveira, P. T. S., Meira Neto, A. A., Roy, T., and Troch, P.: CABra: a novel large-sample dataset for Brazilian catchments, <em>Hydrol. Earth Syst. Sci.</em>, 25, 3105–3135, <a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener">https://doi.org/10.5194/hess-25-3105-2021</a>, 2021.</p>
+          <dl class="facts">
+            <div><dt data-i18n="data_doi">Dados</dt><dd><a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener">10.5281/zenodo.4070146</a></dd></div>
+            <div><dt data-i18n="contact_title">Contato</dt><dd><a href="mailto:andre.almagro@gmail.com">andre.almagro@gmail.com</a></dd></div>
+          </dl>
+          <h3 data-i18n="ack_title">Apoio</h3>
+          <div class="logos">
+            <img src="assets/img/UFMS_logo.png" alt="UFMS">
+            <img src="assets/img/UA_logo.png" alt="University of Arizona">
+            <img src="assets/img/CAPES_logo.png" alt="CAPES">
+            <img src="assets/img/HWS_logo.png" alt="HWS">
           </div>
         </div>
       </div>
-    </div>
+    </section>
+
+    <footer class="site-foot">
+      <span>© CABra · Almagro et al. (2021)</span>
+      <span data-i18n="foot_src">Dados: ANA, ENSEMBLE, GLEAM, MERIT DEM, SoilGrids, Copernicus</span>
+      <span class="links"><a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener" data-i18n="link_paper">Artigo</a><a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener" data-i18n="link_data">Dados</a><a href="#about" data-i18n="nav_about">Sobre o CABra</a></span>
+    </footer>
   </main>
+</div>
 
-  <footer class="rodape" id="rodape">
-    <div class="rodape-in">
-      <div class="rodape-marca">
-        <img src="assets/img/logo_cabra_mark.png" alt="" width="40" height="40">
-        <p data-i18n="footer_text"></p>
-      </div>
-      <div>
-        <h4 data-i18n="contact_title">Contato</h4>
-        <ul><li><a href="mailto:andre.almagro@gmail.com">andre.almagro@gmail.com</a></li></ul>
-      </div>
-      <div>
-        <h4 data-i18n="links_title">Links</h4>
-        <ul>
-          <li><a href="https://doi.org/10.5194/hess-25-3105-2021" target="_blank" rel="noopener" data-i18n="link_paper">Artigo (HESS, 2021)</a></li>
-          <li><a href="https://doi.org/10.5281/zenodo.4070146" target="_blank" rel="noopener" data-i18n="link_data">Dados (Zenodo)</a></li>
-          <li><a href="https://github.com/almagroa/cabra_v2" target="_blank" rel="noopener">GitHub</a></li>
-        </ul>
-      </div>
-    </div>
-  </footer>
-
-  <script src="assets/vendor/leaflet/leaflet.js"></script>
-  <script src="assets/vendor/uplot/uPlot.iife.min.js"></script>
-  <script src="assets/js/i18n.js"></script>
-  <script src="assets/js/data.js"></script>
-  <script src="assets/js/app.js"></script>
+<script src="assets/vendor/leaflet/leaflet.js"></script>
+<script src="assets/vendor/uplot/uPlot.iife.min.js"></script>
+<script src="assets/js/i18n.js"></script>
+<script src="assets/js/data.js"></script>
+<script src="assets/js/app.js"></script>
 </body>
 </html>
