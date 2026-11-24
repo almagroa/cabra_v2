@@ -221,7 +221,7 @@
       const qm = cs.map((c) => c.qmean).filter((x) => x != null).sort((a, b) => a - b);
       $("#kpis").innerHTML = [
         kpi(t("k_basins"), nf(cs.length), "", t("k_basins_n")(new Set(cs.map((c) => c.state)).size, new Set(cs.map((c) => c.biome)).size)),
-        kpi(t("k_period"), "1980–2010", "", t("k_period_n")),
+        kpi(t("k_period"), "1980–2025", "", t("k_period_n")),
         kpi(t("k_area_max"), nf(big.area), "km²", `${esc(big.name)}/${big.state}`),
         kpi(t("k_qmean"), nf(qm[Math.floor(qm.length / 2)], 2), lang === "pt" ? "mm/dia" : "mm/day", lang === "pt" ? "mediana entre as bacias" : "median across catchments"),
         kpi(t("k_attr"), "85", "", t("k_attr_n")),
@@ -356,7 +356,13 @@
 
   // ------------------------------------------------------------------ gráfico
   let plot = null, series = null, chartMode = "q", seriesToken = 0, xZoom = null;
-  const X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
+  // período do eixo x: do início ao fim da série mais longa (vazão pode ir além da chuva)
+  let X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
+  const V1_END = Date.parse("2010-10-01T00:00:00Z") / 1000;
+  const serEnd = (ser) => Date.parse(ser.start + "T00:00:00Z") / 1000 + (ser.values.length - 1) * 86400;
+  function setRange(s) {
+    X_RANGE = [Math.min(Date.parse(s.q.start + "T00:00:00Z"), Date.parse(s.p.start + "T00:00:00Z")) / 1000, Math.max(serEnd(s.q), serEnd(s.p))];
+  }
   function destroyPlot() { if (plot) { plot.destroy(); plot = null; } }
 
   async function loadSeries(c) {
@@ -365,7 +371,7 @@
     $("#chart").innerHTML = `<div class="loading">${t("loading")}</div>`;
     const s = await D.series(c.id);
     if (token !== seriesToken) return;
-    series = s;
+    series = s; setRange(s);
     drawChart();
   }
   document.querySelectorAll("#chart-modes button").forEach((b) => b.addEventListener("click", () => {
@@ -411,7 +417,21 @@
         series: [{ label: lang === "pt" ? "Data" : "Date", value: (u, x) => (x == null ? "–" : fmtDate(new Date(x * 1000).toISOString().slice(0, 10))) },
           isQ ? { label: lang === "pt" ? "Vazão (m³/s)" : "Streamflow (m³/s)", stroke: cq, width: 1.2, fill: cq + "1f", value: (u, x) => (x == null ? "–" : nf(x, autoD(x))) }
               : { label: lang === "pt" ? "Precipitação (mm)" : "Precipitation (mm)", stroke: cp, width: 0, fill: cp + "cc", paths: uPlot.paths.bars({ size: [1, 3], gap: 0 }), value: (u, x) => (x == null ? "–" : nf(x, 1)) }],
-        hooks: { setScale: [(u, k) => { if (k === "x") xZoom = [u.scales.x.min, u.scales.x.max]; }] },
+        hooks: {
+          setScale: [(u, k) => { if (k === "x") xZoom = [u.scales.x.min, u.scales.x.max]; }],
+          // linha que separa a v1 (até set/2010) da prévia da v2
+          draw: [(u) => {
+            if (serEnd(s) <= V1_END) return;
+            const x = Math.round(u.valToPos(V1_END, "x", true));
+            if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
+            const g = u.ctx; g.save();
+            g.strokeStyle = css("--fg-3"); g.setLineDash([5, 4]); g.lineWidth = devicePixelRatio;
+            g.beginPath(); g.moveTo(x, u.bbox.top); g.lineTo(x, u.bbox.top + u.bbox.height); g.stroke();
+            g.setLineDash([]); g.textAlign = "left"; g.textBaseline = "alphabetic"; g.fillStyle = css("--fg-3"); g.font = `${11 * devicePixelRatio}px 'IBM Plex Sans', sans-serif`;
+            g.fillText(lang === "pt" ? "prévia v2 →" : "v2 preview →", x + 6 * devicePixelRatio, u.bbox.top + 14 * devicePixelRatio);
+            g.restore();
+          }],
+        },
       };
       $("#chart-hint").hidden = false;
     }
