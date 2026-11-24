@@ -130,6 +130,9 @@
     prec: { key: "prec", d: 0, ramp: DIV },
     qmean: { key: "qmean", d: 2, ramp: SEQ },
     hdi: { key: "hdi", d: 2, ramp: ["#C9DCF5", "#D99A2B", "#B4531A", "#7a2d0c", "#4a1a06"] },
+    // falhas na série de vazão publicada (1980–2025), em % dos dias
+    // classes fixas, para que poucas falhas não pareçam muitas (a maioria das bacias tem menos de 5%)
+    q_missing: { key: "q_missing", bins: [[1, "#2F86E0", "< 1%"], [5, "#7FB8E8", "1–5%"], [10, "#E8B04A", "5–10%"], [20, "#D4602A", "10–20%"], [Infinity, "#9E1B12", "≥ 20%"]] },
   };
   let colorBy = "biome";
 
@@ -142,6 +145,7 @@
   function colorFn() {
     const v = VARIABLES[colorBy];
     if (v.cat) return { cat: true, fn: (c) => BIOME_COLORS[c.biome] || "#8E9AAB" };
+    if (v.bins) return { bins: v.bins, fn: (c) => { const x = c[v.key]; if (x === null || x === undefined) return "#8E9AAB"; return v.bins.find(([lim]) => x < lim)[1]; } };
     const get = (c) => c[v.key];
     const vals = catchments.map(get).filter((x) => x !== null && !isNaN(x)).sort((a, b) => a - b);
     const rank = (x) => { let lo = 0, hi = vals.length - 1; while (lo < hi) { const m = (lo + hi) >> 1; if (vals[m] < x) lo = m + 1; else hi = m; } return lo / (vals.length - 1); };
@@ -171,6 +175,10 @@
       const counts = {};
       catchments.filter(visible).forEach((c) => { counts[c.biome] = (counts[c.biome] || 0) + 1; });
       lg.innerHTML = Object.keys(BIOME_COLORS).map((b) => `<span><i style="background:${BIOME_COLORS[b]}"></i>${biomeName(b)} (${counts[b] || 0})</span>`).join("");
+    } else if (cf.bins) {
+      const counts = cf.bins.map(() => 0);
+      catchments.filter(visible).forEach((c) => { const x = c[VARIABLES[colorBy].key]; if (x != null) counts[cf.bins.findIndex(([lim]) => x < lim)]++; });
+      lg.innerHTML = `<span>${t("v_" + colorBy)}:</span>` + cf.bins.map(([, col, lab], i) => `<span><i style="background:${col}"></i>${lab} (${counts[i]})</span>`).join("");
     } else {
       lg.innerHTML = `<span class="num">${nf(cf.q(0), cf.d)}</span><span class="ramp" style="background:linear-gradient(90deg,${cf.ramp.join(",")})"></span><span class="num">${nf(cf.q(1), cf.d)}</span><span>· ${t("v_" + colorBy)} (${lang === "pt" ? "mediana" : "median"} ${nf(cf.q(0.5), cf.d)})</span>`;
     }
@@ -349,7 +357,7 @@
     const mm = lang === "pt" ? "mm/dia" : "mm/day";
     $("#pop-name").textContent = `${c.name}/${c.state}`;
     $("#pop-dl").innerHTML = [
-      [t("pop_ana"), c.ana], [t("pop_biome"), biomeName(c.biome)], [t("pop_missing"), `${nf(c.missing, 1)}%`],
+      [t("pop_ana"), c.ana], [t("pop_biome"), biomeName(c.biome)], [t("pop_missing"), `${nf(c.q_missing ?? c.missing, 1)}%`],
       [t("k_area"), `${nf(c.area)} km²`], [t("pop_elev"), `${nf(c.elev)} m`], [t("k_prec"), `${nf(c.prec)} mm`],
       [t("k_qmean"), `${nf(c.qmean, 2)} ${mm}`], [t("k_arid"), nf(c.aridity, 2)], [t("k_hdi"), nf(c.hdi, 2)],
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
