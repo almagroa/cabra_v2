@@ -87,7 +87,7 @@
     if (outlines) outlines.setStyle(outlineStyle());
   }
   const BaseCtl = L.Control.extend({
-    options: { position: "topleft" },
+    options: { position: "bottomright" },
     onAdd() {
       const d = L.DomUtil.create("div", "leaflet-bar base-ctl");
       d.innerHTML = `<select id="base-sel" aria-label=""></select>`;
@@ -186,9 +186,23 @@
     const m = markers.get(id);
     if (m) m.bringToFront();
   }
+  // margens para enquadrar o mapa sem ficar atrás dos cartões flutuantes (layout de tela cheia)
+  function ovPad(m = 24) {
+    if (!document.body.classList.contains("is-map") || innerWidth <= 820) return { paddingTopLeft: [m, m], paddingBottomRight: [m, m] };
+    const mw = map.getContainer().getBoundingClientRect();
+    const r = (q) => { const e = $(q); return e && !e.hidden && e.offsetParent ? e.getBoundingClientRect() : null; };
+    const k = r("#kpis"), pop = r("#map-pop"), dr = r("#chart-panel"), card = r(".map-card");
+    return {
+      paddingTopLeft: [pop ? pop.right - mw.left + m : 60, k ? k.bottom - mw.top + m : m],
+      paddingBottomRight: [dr ? mw.right - dr.left + m : m, card ? mw.bottom - card.top + m : m],
+    };
+  }
+  // no layout de tela cheia, o painel de atributos começa logo abaixo do painel de gráficos
+  new ResizeObserver(() => { const h = $("#chart-panel").offsetHeight; if (h) document.body.style.setProperty("--chart-h", h + "px"); }).observe($("#chart-panel"));
+  new ResizeObserver(() => { const h = $("#kpis").offsetHeight; if (h) document.body.style.setProperty("--kpi-h", h + "px"); }).observe($("#kpis"));
   function fitAll() {
     const cs = catchments.filter(visible);
-    if (cs.length) map.fitBounds(L.latLngBounds(cs.map((c) => [c.lat, c.lon])), { padding: [24, 24], maxZoom: 8 });
+    if (cs.length) map.fitBounds(L.latLngBounds(cs.map((c) => [c.lat, c.lon])), Object.assign({ maxZoom: 8 }, ovPad()));
   }
   // limites estaduais, acima dos contornos das bacias e sem eventos; o estado filtrado fica destacado
   map.createPane("states");
@@ -365,7 +379,7 @@
     $("#list-panel").hidden = true;
     $("#chart-panel").hidden = false;
     $("#attr-panel").hidden = false;
-    $(".grid2").classList.add("sel");
+    $(".grid2").classList.add("sel"); document.body.classList.add("has-sel");
     map.invalidateSize();
     $("#d-csv").disabled = false;
     renderAttrBox(); renderKpis(); renderPicker(); highlight(id); renderPop(c);
@@ -375,7 +389,8 @@
     if (boundaryLayer) map.removeLayer(boundaryLayer);
     boundaryLayer = L.geoJSON(geom, { style: { color: css("--brand"), weight: 2, fillColor: css("--brand"), fillOpacity: 0.15 }, interactive: false, pane: "basin", renderer: basinRenderer }).addTo(map);
     const popW = getComputedStyle($("#map-pop")).position === "absolute" ? $("#map-pop").offsetWidth + 20 : 0;
-    map.flyToBounds(boundaryLayer.getBounds(), { paddingTopLeft: [30, 30], paddingBottomRight: [30 + popW, 30], maxZoom: 10, duration: 0.6 });
+    const pad = document.body.classList.contains("is-map") && innerWidth > 820 ? ovPad(30) : { paddingTopLeft: [30, 30], paddingBottomRight: [30 + popW, 30] };
+    map.flyToBounds(boundaryLayer.getBounds(), Object.assign({ maxZoom: 10, duration: 0.6 }, pad));
     loadSeries(c);
   }
   function clearSelection() {
@@ -383,7 +398,7 @@
     if (boundaryLayer) { map.removeLayer(boundaryLayer); boundaryLayer = null; }
     $("#chart-panel").hidden = true;
     $("#attr-panel").hidden = true;
-    $(".grid2").classList.remove("sel");
+    $(".grid2").classList.remove("sel"); document.body.classList.remove("has-sel");
     map.invalidateSize();
     $("#d-csv").disabled = true;
     $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`;
@@ -434,7 +449,7 @@
     areaSel = new Set(catchments.filter((c) => inPolys(polys, c.lon, c.lat)).map((c) => c.id));
     if (selected && !areaSel.has(selected.id)) go("#map");
     refreshArea();
-    map.fitBounds(areaLayer.getBounds(), { padding: [30, 30] });
+    map.fitBounds(areaLayer.getBounds(), ovPad(30));
   }
   function clearArea() {
     areaSel = null;
@@ -770,6 +785,7 @@
     $("#crumb").textContent = t("crumb_" + key);
     $("#title").textContent = t("title_" + key);
     $("#picker").hidden = v !== "map";
+    document.body.classList.toggle("is-map", v === "map");
     $("#side").classList.remove("open");
     if (v === "map") {
       setTimeout(() => map.invalidateSize(), 0);

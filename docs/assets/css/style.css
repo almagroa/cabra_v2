@@ -254,3 +254,56 @@ tbody tr:hover td { background: var(--surface-2); }
   .facts, #attr-panel .facts { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* ---------------------------------------------------------------- painel do mapa (layout empilhado) */
+.map-panel { display: flex; flex-direction: column; gap: 12px; }
+.map-panel .map-card { display: contents; }
+.map-panel .map-card header { order: 1; }
+.map-panel .map-wrap { order: 2; }
+.map-panel .map-card .legend { order: 3; }
+.map-panel .area-bar { order: 4; margin-top: 0; }
+
+/* ---------------------------------------------------------------- mapa em tela cheia (computador)
+   O mapa ocupa todo o fundo à direita da barra lateral e os cartões flutuam sobre ele. */
+@media (min-width: 821px) {
+  body.is-map { --ov-top: 84px; --ov-gap: 16px; --drawer-w: min(500px, 40vw); overflow: hidden; }
+  body.is-map main { height: 100vh; overflow: hidden; position: relative; }
+  body.is-map .site-foot { display: none; }
+  body.is-map .ctx { position: absolute; top: 0; left: 0; right: 0; z-index: 900; background: color-mix(in srgb, var(--bg) 78%, transparent); }
+  body.is-map #view-map { padding: 0; max-width: none; position: absolute; inset: 0; display: block; }
+  body.is-map .grid2, body.is-map .grid2.sel { display: block; }
+  body.is-map .map-panel { position: static; background: none; border: 0; padding: 0; box-shadow: none; display: block; }
+  body.is-map .map-panel .map-wrap.chart { position: absolute; inset: 0; height: auto; border-radius: 0; z-index: 0; }
+  /* cartões flutuantes */
+  body.is-map .ov, body.is-map #kpis, body.is-map .map-card, body.is-map #chart-panel, body.is-map #attr-panel, body.is-map .area-bar {
+    position: absolute; z-index: 800; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 28px rgba(8, 24, 52, .16);
+  }
+  body.is-map #kpis { top: var(--ov-top); left: var(--ov-gap); padding: 10px 4px; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 0; width: min(980px, calc(100% - 2 * var(--ov-gap))); }
+  body.is-map.has-sel #kpis { width: calc(100% - var(--drawer-w) - 3 * var(--ov-gap)); }
+  body.is-map #kpis .kpi { padding: 2px 16px; border-left: 1px solid var(--line); }
+  body.is-map #kpis .kpi:first-child { border-left: 0; }
+  body.is-map #kpis .kpi b { font-size: 20px; overflow: visible; }
+  body.is-map #kpis .kpi span { font-size: 11.5px; }
+  body.is-map #kpis .kpi em { font-size: 11px; white-space: normal; line-height: 1.3; }
+  body.is-map .map-card { display: flex; flex-direction: column; gap: 8px; left: var(--ov-gap); bottom: var(--ov-gap); padding: 12px 14px; max-width: min(640px, calc(100% - var(--drawer-w) - 3 * var(--ov-gap))); }
+  body.is-map .map-card header { order: 0; }
+  body.is-map .map-card header p { display: none; }
+  body.is-map .map-card .seg { margin-left: 0; order: 3; }
+  body.is-map .map-card .legend { order: 0; }
+  body.is-map .area-bar { left: 50%; transform: translateX(-50%); bottom: var(--ov-gap); margin: 0; max-width: 760px; }
+  body.is-map .map-card:has(~ .area-bar:not([hidden])) { bottom: calc(var(--ov-gap) + 64px); }
+  body.is-map #chart-panel { top: var(--ov-top); right: var(--ov-gap); width: var(--drawer-w); padding: 14px 16px; }
+  body.is-map #chart-panel .chart.side-chart { height: min(330px, 34vh); }
+  body.is-map #chart-panel #chart-hint { display: none; }
+  body.is-map #attr-panel { right: var(--ov-gap); width: var(--drawer-w); bottom: var(--ov-gap); top: calc(var(--ov-top) + var(--chart-h, 470px) + 12px); overflow: auto; padding: 14px 16px; margin: 0; display: block; }
+  body.is-map #attr-panel > * { margin-bottom: 12px; }
+  body.is-map #chart-panel .u-legend { margin-bottom: 0; }
+  body.is-map #attr-panel .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  body.is-map #d-tab-body { grid-template-columns: minmax(0, 1fr); }
+  body.is-map .map-pop { top: calc(var(--ov-top) + var(--kpi-h, 110px) + 12px); left: calc(var(--ov-gap) + 52px); right: auto; max-height: calc(100% - var(--ov-top) - var(--kpi-h, 110px) - 220px); }
+  body.is-map .leaflet-top.leaflet-left { top: calc(var(--ov-top) + var(--kpi-h, 110px) + 2px); left: 6px; }
+  body.is-map .leaflet-bottom.leaflet-right { right: 0; }
+  body.is-map.has-sel .leaflet-bottom.leaflet-right { right: calc(var(--drawer-w) + 2 * var(--ov-gap)); }
+  body.is-map .map-stamp { display: none; }
+}
