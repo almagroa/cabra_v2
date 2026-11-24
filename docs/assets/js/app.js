@@ -65,7 +65,7 @@
 
   // ------------------------------------------------------------------ estado
   let catchments = [], byId = new Map(), attributes = null, attrIndex = {};
-  let selected = null, stateF = "";
+  let selected = null, stateF = "", areaSel = null, areaLayer = null;
 
   // ------------------------------------------------------------------ mapa
   const map = L.map("leaflet-map", { zoomControl: true, preferCanvas: true, minZoom: 3, attributionControl: true }).setView([-15, -52], 4);
@@ -120,7 +120,7 @@
     const q = (p) => vals[Math.round(p * (vals.length - 1))];
     return { fn: (c) => (get(c) === null ? "#8E9AAB" : rampColor(v.ramp, rank(get(c)))), q, d: v.d, ramp: v.ramp };
   }
-  const visible = (c) => !stateF || c.state === stateF;
+  const visible = (c) => (!stateF || c.state === stateF) && (!areaSel || areaSel.has(c.id));
 
   function drawPoints() {
     const cf = colorFn();
@@ -354,6 +354,198 @@
   }
   $("#d-close").addEventListener("click", () => go("#map"));
 
+
+  // ------------------------------------------------------------------ seleção por área (retângulo ou polígono enviado) e download
+  // Uma bacia entra na seleção quando a estação (exutório) está dentro da área.
+  const areaStyle = () => ({ color: css("--brand"), weight: 2, dashArray: "6 4", fillColor: css("--brand"), fillOpacity: 0.06, interactive: false, pane: "basin", renderer: basinRenderer });
+  function ringsOf(geom) {
+    // devolve uma lista de polígonos, cada um uma lista de anéis [[lon, lat], ...]
+    if (!geom) return [];
+    if (geom.type === "FeatureCollection") return geom.features.flatMap((f) => ringsOf(f.geometry));
+    if (geom.type === "Feature") return ringsOf(geom.geometry);
+    if (geom.type === "GeometryCollection") return geom.geometries.flatMap(ringsOf);
+    if (geom.type === "Polygon") return [geom.coordinates];
+    if (geom.type === "MultiPolygon") return geom.coordinates;
+    return [];
+  }
+  function inRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j];
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  const inPolys = (polys, x, y) => polys.some((rings) => inRing(x, y, rings[0]) && !rings.slice(1).some((h) => inRing(x, y, h)));
+  function kmlToGeoJSON(text) {
+    const doc = new DOMParser().parseFromString(text, "application/xml");
+    const polys = [...doc.getElementsByTagName("Polygon")].map((pg) => {
+      const read = (el) => el.textContent.trim().split(/\s+/).map((tk) => tk.split(",").slice(0, 2).map(Number)).filter((c) => c.length === 2 && c.every(Number.isFinite));
+      const outer = pg.getElementsByTagName("outerBoundaryIs")[0], inner = [...pg.getElementsByTagName("innerBoundaryIs")];
+      const oc = outer && outer.getElementsByTagName("coordinates")[0];
+      return oc ? [read(oc), ...inner.map((b) => read(b.getElementsByTagName("coordinates")[0]))] : null;
+    }).filter(Boolean);
+    return { type: "MultiPolygon", coordinates: polys };
+  }
+  function setArea(geojson) {
+    const polys = ringsOf(geojson);
+    if (!polys.length) { alertBar(t("area_bad")); return; }
+    if (areaLayer) map.removeLayer(areaLayer);
+    areaLayer = L.geoJSON(geojson, { style: areaStyle }).addTo(map);
+    areaSel = new Set(catchments.filter((c) => inPolys(polys, c.lon, c.lat)).map((c) => c.id));
+    if (selected && !areaSel.has(selected.id)) go("#map");
+    refreshArea();
+    map.fitBounds(areaLayer.getBounds(), { padding: [30, 30] });
+  }
+  function clearArea() {
+    areaSel = null;
+    if (areaLayer) { map.removeLayer(areaLayer); areaLayer = null; }
+    refreshArea();
+  }
+  function refreshArea() {
+    renderPicker(); drawPoints(); renderList(); renderKpis(); renderAreaBar();
+  }
+  function alertBar(msg) { const b = $("#area-bar"); b.hidden = false; b.innerHTML = `<span class="ab-msg">${esc(msg)}</span>`; setTimeout(renderAreaBar, 4000); }
+  function renderAreaBar() {
+    const b = $("#area-bar");
+    if (!areaSel) { b.hidden = true; b.innerHTML = ""; return; }
+    const n = [...areaSel].filter((id) => visible(byId.get(id))).length;
+    b.hidden = false;
+    b.innerHTML = `<b>${t("area_n")(n)}</b>
+      <label>${t("area_rain")} <select id="area-src">${["v1", "brdwgd", "chirps", "all"].map((k) => `<option value="${k}">${k === "all" ? t("area_all") : P_LABEL[k]}</option>`).join("")}</select></label>
+      <button class="btn" type="button" id="area-attr" ${n ? "" : "disabled"}>${t("area_dl_attr")}</button>
+      <button class="btn primary" type="button" id="area-zip" ${n ? "" : "disabled"}>${t("area_dl_zip")}</button>
+      <button class="btn" type="button" id="area-clear">${t("area_clear")}</button>
+      <span class="ab-msg" id="area-msg"></span>`;
+    $("#area-clear").addEventListener("click", clearArea);
+    $("#area-attr").addEventListener("click", () => download(`CABra_atributos_${n}_bacias.csv`, attrCSV(areaIds())));
+    $("#area-zip").addEventListener("click", areaZip);
+  }
+  const areaIds = () => [...areaSel].filter((id) => visible(byId.get(id))).sort((a, b) => a - b);
+  function csvCell(v) { if (v === null || v === undefined) return ""; const s = String(v); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }
+  function attrCSV(ids) {
+    const cols = [["CABra ID", null]];
+    CLASS_KEYS.forEach((k) => attributes[k].columns.forEach((c) => { if (c !== "CABra ID" && !(c === "ANA ID" && k !== "general")) cols.push([c, k]); }));
+    const lines = [cols.map(([c]) => csvCell(c)).join(",")];
+    ids.forEach((id) => lines.push(cols.map(([c, k]) => csvCell(k ? row(k, id)[c] : id)).join(",")));
+    return lines.join("\n");
+  }
+  async function areaZip() {
+    const ids = areaIds(), src = $("#area-src").value, msg = $("#area-msg"), files = [];
+    const srcs = src === "all" ? ["v1", "brdwgd", "chirps"] : [src];
+    $("#area-zip").disabled = true;
+    const enc = new TextEncoder();
+    files.push(["atributos.csv", enc.encode(attrCSV(ids))]);
+    for (let i = 0; i < ids.length; i++) {
+      const c = byId.get(ids[i]);
+      msg.textContent = `${t("area_prep")} ${i + 1}/${ids.length}`;
+      const s = await D.series(c.id), cols = [["streamflow_m3s", s.q]];
+      for (const k of srcs) {
+        let ser = s.p;
+        if (k !== "v1") { try { ser = await D.precip(c.id, k); } catch (e) { continue; } }
+        cols.push([`precip_mm_${k === "v1" ? "xavier_v1" : k}`, ser]);
+      }
+      files.push([`series/CABra_${c.id}_${c.ana}.csv`, enc.encode(seriesCSV(c, cols))]);
+    }
+    files.push(["LEIA-ME.txt", enc.encode(t("area_readme")(ids.length, srcs.map((k) => P_LABEL[k]).join(", ")))]);
+    msg.textContent = t("area_zip");
+    const blob = zipStore(files);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = `CABra_${ids.length}_bacias.zip`;
+    document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    msg.textContent = ""; $("#area-zip").disabled = false;
+  }
+  function seriesCSV(c, cols) {
+    const rows = new Map();
+    cols.forEach(([name, ser], j) => { const t0 = Date.parse(ser.start + "T00:00:00Z"); ser.values.forEach((v, i) => { const d = new Date(t0 + i * 86400000).toISOString().slice(0, 10); if (!rows.has(d)) rows.set(d, new Array(cols.length).fill("")); rows.get(d)[j] = v ?? ""; }); });
+    const out = [`# CABra ${c.id} - ${c.name} (ANA ${c.ana})`, "# streamflow: CABra v1 ate 2010-09-30; depois, dados ANA processados (previa da v2)", "date," + cols.map(([n]) => n).join(",")];
+    [...rows.keys()].sort().forEach((d) => out.push(d + "," + rows.get(d).join(",")));
+    return out.join("\n");
+  }
+  // ZIP sem compressão (método "store"), suficiente para CSV e sem bibliotecas externas
+  const CRC_T = (() => { const tb = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; tb[n] = c >>> 0; } return tb; })();
+  const crc32 = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  function zipStore(files) {
+    const parts = [], central = []; let off = 0;
+    const enc = new TextEncoder();
+    for (const [name, data] of files) {
+      const nm = enc.encode(name), crc = crc32(data);
+      const h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, 0, true); h.setUint16(12, 0x21, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+      h.setUint16(26, nm.length, true); h.setUint16(28, 0, true);
+      parts.push(h, nm, data);
+      const cd = new DataView(new ArrayBuffer(46));
+      cd.setUint32(0, 0x02014b50, true); cd.setUint16(4, 20, true); cd.setUint16(6, 20, true); cd.setUint16(8, 0x0800, true); cd.setUint16(10, 0, true);
+      cd.setUint16(12, 0, true); cd.setUint16(14, 0x21, true); cd.setUint32(16, crc, true); cd.setUint32(20, data.length, true); cd.setUint32(24, data.length, true);
+      cd.setUint16(28, nm.length, true); cd.setUint32(42, off, true);
+      central.push(cd, nm);
+      off += 30 + nm.length + data.length;
+    }
+    const cdSize = central.reduce((a, x) => a + x.byteLength, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, off, true);
+    return new Blob([...parts, ...central, end], { type: "application/zip" });
+  }
+  // ferramentas no mapa: retângulo, enviar polígono, limpar área
+  let drawing = false, drawStart = null, drawRect = null;
+  const AreaCtl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const d = L.DomUtil.create("div", "leaflet-bar area-ctl");
+      d.innerHTML = `<a href="#" role="button" data-a="rect" title=""><svg width="16" height="16" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.5 1.8"/></svg></a>
+        <a href="#" role="button" data-a="poly" title=""><svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 5.5 8 2l5 3.5-1.5 7h-7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M8 11V6.5m0 0L6.2 8.3M8 6.5l1.8 1.8" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg></a>`;
+      L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+      d.addEventListener("click", (e) => {
+        const a = e.target.closest("a"); if (!a) return; e.preventDefault();
+        if (a.dataset.a === "rect") toggleDraw(!drawing);
+        else $("#area-file").click();
+      });
+      return d;
+    },
+  });
+  map.addControl(new AreaCtl());
+  setTimeout(areaTitles, 0);
+  function areaTitles() {
+    const d = document.querySelector(".area-ctl"); if (!d) return;
+    d.querySelector('[data-a="rect"]').title = t("area_rect"); d.querySelector('[data-a="rect"]').setAttribute("aria-label", t("area_rect"));
+    d.querySelector('[data-a="poly"]').title = t("area_poly"); d.querySelector('[data-a="poly"]').setAttribute("aria-label", t("area_poly"));
+  }
+  function toggleDraw(on) {
+    drawing = on;
+    const ct = map.getContainer();
+    ct.classList.toggle("drawing", on);
+    document.querySelector('.area-ctl [data-a="rect"]').classList.toggle("on", on);
+    if (on) { map.dragging.disable(); map.boxZoom.disable(); alertBar(t("area_draw_hint")); }
+    else { map.dragging.enable(); map.boxZoom.enable(); }
+  }
+  const mc = map.getContainer();
+  mc.addEventListener("pointerdown", (e) => {
+    if (!drawing || e.button > 0 || e.target.closest(".leaflet-control")) return;
+    drawStart = map.mouseEventToLatLng(e);
+    drawRect = L.rectangle(L.latLngBounds(drawStart, drawStart), areaStyle()).addTo(map);
+    mc.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  mc.addEventListener("pointermove", (e) => { if (drawing && drawRect) drawRect.setBounds(L.latLngBounds(drawStart, map.mouseEventToLatLng(e))); });
+  mc.addEventListener("pointerup", (e) => {
+    if (!drawing || !drawRect) return;
+    const bb = drawRect.getBounds(); map.removeLayer(drawRect); drawRect = null; toggleDraw(false);
+    if (Math.abs(bb.getEast() - bb.getWest()) < 1e-4 || Math.abs(bb.getNorth() - bb.getSouth()) < 1e-4) { renderAreaBar(); return; }
+    const [w, so, ea, no] = [bb.getWest(), bb.getSouth(), bb.getEast(), bb.getNorth()];
+    setArea({ type: "Polygon", coordinates: [[[w, so], [ea, so], [ea, no], [w, no], [w, so]]] });
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && drawing) { if (drawRect) { map.removeLayer(drawRect); drawRect = null; } toggleDraw(false); renderAreaBar(); } });
+  $("#area-file").addEventListener("change", async (e) => {
+    const f = e.target.files[0]; e.target.value = "";
+    if (!f) return;
+    try {
+      const text = await f.text();
+      const gj = /\.kml$/i.test(f.name) || /^\s*<\?xml|<kml/i.test(text.slice(0, 200)) ? kmlToGeoJSON(text) : JSON.parse(text);
+      setArea(gj);
+    } catch (err) { alertBar(t("area_bad")); }
+  });
+
   // ------------------------------------------------------------------ gráfico
   let plot = null, series = null, chartMode = "q", seriesToken = 0, xZoom = null;
   // fonte da chuva: "v1" (a do CABra v1, dentro de series) ou uma série completa de outra fonte
@@ -555,7 +747,7 @@
   function refreshAll() {
     drawPoints(); renderPicker(); renderList(); renderKpis(); renderClasses(); renderTable();
     $("#map-title").textContent = t("map_title"); $("#map-sub").textContent = t("map_sub"); $("#map-stamp").textContent = t("map_stamp");
-    route();
+    route(); areaTitles(); renderAreaBar();
     if (selected) { renderAttrBox(); if (series) drawChart(); if (!$("#map-pop").hidden) renderPop(selected, true); }
     else { popBuilt = false; $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`; $("#series-sub").textContent = t("series_sub_none"); }
   }
