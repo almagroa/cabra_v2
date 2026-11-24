@@ -69,16 +69,44 @@
 
   // ------------------------------------------------------------------ mapa
   const map = L.map("leaflet-map", { zoomControl: true, preferCanvas: true, minZoom: 3, zoomSnap: 0.25, zoomDelta: 0.5, attributionControl: true }).setView([-15, -52], 4);
-  let base = null;
+  // mapa de fundo: só provedores que não exigem chave (o CARTO passou a exigir)
+  const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services";
+  const BASES = {
+    map: () => ({ url: `${ESRI}/Canvas/${isDark() ? "World_Dark_Gray_Base" : "World_Light_Gray_Base"}/MapServer/tile/{z}/{y}/{x}`, attribution: 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, HERE, Garmin, &copy; OpenStreetMap', maxZoom: 16 }),
+    osm: () => ({ url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png", attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 19 }),
+    sat: () => ({ url: `${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, attribution: 'Tiles &copy; <a href="https://www.esri.com">Esri</a> &mdash; Esri, Maxar, Earthstar Geographics', maxZoom: 18 }),
+    none: () => null,
+  };
+  let base = null, baseKind = "map";
+  try { baseKind = localStorage.getItem("cabra-base") || "map"; } catch (e) { /* ok */ }
+  if (!BASES[baseKind]) baseKind = "map";
   function setBase() {
-    if (base) map.removeLayer(base);
-    base = L.tileLayer(`https://{s}.basemaps.cartocdn.com/${isDark() ? "dark_all" : "light_all"}/{z}/{x}/{y}{r}.png`, {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      subdomains: "abcd", maxZoom: 18,
-    }).addTo(map);
-    base.bringToBack();
+    if (base) { map.removeLayer(base); base = null; }
+    const b = BASES[baseKind]();
+    if (b) { base = L.tileLayer(b.url, { attribution: b.attribution, maxZoom: b.maxZoom, maxNativeZoom: b.maxZoom }).addTo(map); base.bringToBack(); }
     if (outlines) outlines.setStyle(outlineStyle());
   }
+  const BaseCtl = L.Control.extend({
+    options: { position: "topleft" },
+    onAdd() {
+      const d = L.DomUtil.create("div", "leaflet-bar base-ctl");
+      d.innerHTML = `<select id="base-sel" aria-label=""></select>`;
+      L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d);
+      d.querySelector("select").addEventListener("change", (e) => {
+        baseKind = e.target.value;
+        try { localStorage.setItem("cabra-base", baseKind); } catch (err) { /* ok */ }
+        setBase();
+      });
+      return d;
+    },
+  });
+  map.addControl(new BaseCtl());
+  function renderBaseSel() {
+    const sel = $("#base-sel"); if (!sel) return;
+    sel.setAttribute("aria-label", t("base_label"));
+    sel.innerHTML = ["map", "osm", "sat", "none"].map((k) => `<option value="${k}" ${k === baseKind ? "selected" : ""}>${t("base_" + k)}</option>`).join("");
+  }
+  setTimeout(renderBaseSel, 0);
   const canvas = L.canvas({ padding: 0.3 });
   // contorno da bacia selecionada num painel abaixo dos pontos e sem eventos,
   // para não cobrir o canvas dos pontos (senão os cliques no mapa param de funcionar)
@@ -758,7 +786,7 @@
   function refreshAll() {
     drawPoints(); renderPicker(); renderList(); renderKpis(); renderClasses(); renderTable();
     $("#map-title").textContent = t("map_title"); $("#map-sub").textContent = t("map_sub"); $("#map-stamp").textContent = t("map_stamp");
-    route(); areaTitles(); renderAreaBar();
+    route(); areaTitles(); renderAreaBar(); renderBaseSel();
     if (selected) { renderAttrBox(); if (series) drawChart(); if (!$("#map-pop").hidden) renderPop(selected, true); }
     else { popBuilt = false; $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`; $("#series-sub").textContent = t("series_sub_none"); }
   }
