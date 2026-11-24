@@ -80,6 +80,12 @@
     if (outlines) outlines.setStyle(outlineStyle());
   }
   const canvas = L.canvas({ padding: 0.3 });
+  // contorno da bacia selecionada num painel abaixo dos pontos e sem eventos,
+  // para não cobrir o canvas dos pontos (senão os cliques no mapa param de funcionar)
+  map.createPane("basin");
+  map.getPane("basin").style.zIndex = 390;
+  map.getPane("basin").style.pointerEvents = "none";
+  const basinRenderer = L.canvas({ padding: 0.3, pane: "basin" });
   const pointsLayer = L.layerGroup().addTo(map);
   let outlines = null, boundaryLayer = null;
   const markers = new Map();
@@ -327,7 +333,7 @@
     const geom = await D.boundary(id);
     if (selected !== c) return;
     if (boundaryLayer) map.removeLayer(boundaryLayer);
-    boundaryLayer = L.geoJSON(geom, { style: { color: css("--brand"), weight: 2, fillColor: css("--brand"), fillOpacity: 0.15 }, interactive: false }).addTo(map);
+    boundaryLayer = L.geoJSON(geom, { style: { color: css("--brand"), weight: 2, fillColor: css("--brand"), fillOpacity: 0.15 }, interactive: false, pane: "basin", renderer: basinRenderer }).addTo(map);
     const popW = getComputedStyle($("#map-pop")).position === "absolute" ? $("#map-pop").offsetWidth + 20 : 0;
     map.flyToBounds(boundaryLayer.getBounds(), { paddingTopLeft: [30, 30], paddingBottomRight: [30 + popW, 30], maxZoom: 10, duration: 0.6 });
     loadSeries(c);
