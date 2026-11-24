@@ -356,12 +356,24 @@
 
   // ------------------------------------------------------------------ gráfico
   let plot = null, series = null, chartMode = "q", seriesToken = 0, xZoom = null;
+  // fonte da chuva: "v1" (a do CABra v1, dentro de series) ou uma série completa de outra fonte
+  let pSrc = "v1", pAlt = null, pMsg = "";
+  const curP = () => (pSrc !== "v1" && pAlt ? pAlt : series.p);
+  const P_LABEL = { v1: "Xavier et al. (2016) · CABra v1", brdwgd: "BR-DWGD (Xavier atualizado)", chirps: "CHIRPS" };
+  async function loadPrecip(c, token) {
+    pAlt = null; pMsg = "";
+    if (pSrc === "v1") return;
+    try { pAlt = await D.precip(c.id, pSrc); }
+    catch (e) { pMsg = lang === "pt" ? `Chuva ${P_LABEL[pSrc]} ainda não disponível para esta bacia; mostrando a da v1.` : `${P_LABEL[pSrc]} rainfall is not available for this catchment yet; showing v1.`; }
+    if (token !== seriesToken) return false;
+  }
   // período do eixo x: do início ao fim da série mais longa (vazão pode ir além da chuva)
   let X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
   const V1_END = Date.parse("2010-10-01T00:00:00Z") / 1000;
   const serEnd = (ser) => Date.parse(ser.start + "T00:00:00Z") / 1000 + (ser.values.length - 1) * 86400;
-  function setRange(s) {
-    X_RANGE = [Math.min(Date.parse(s.q.start + "T00:00:00Z"), Date.parse(s.p.start + "T00:00:00Z")) / 1000, Math.max(serEnd(s.q), serEnd(s.p))];
+  function setRange() {
+    const q = series.q, p = curP();
+    X_RANGE = [Math.min(Date.parse(q.start + "T00:00:00Z"), Date.parse(p.start + "T00:00:00Z")) / 1000, Math.max(serEnd(q), serEnd(p))];
   }
   function destroyPlot() { if (plot) { plot.destroy(); plot = null; } }
 
@@ -371,14 +383,25 @@
     $("#chart").innerHTML = `<div class="loading">${t("loading")}</div>`;
     const s = await D.series(c.id);
     if (token !== seriesToken) return;
-    series = s; setRange(s);
-    drawChart();
+    series = s;
+    if ((await loadPrecip(c, token)) === false || token !== seriesToken) return;
+    setRange(); drawChart();
   }
   document.querySelectorAll("#chart-modes button").forEach((b) => b.addEventListener("click", () => {
     chartMode = b.dataset.mode;
     document.querySelectorAll("#chart-modes button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    $("#p-src").hidden = chartMode !== "p";
     if (selected && series) drawChart();
   }));
+  $("#p-src").addEventListener("click", async (e) => {
+    const b = e.target.closest("button"); if (!b || b.dataset.src === pSrc) return;
+    pSrc = b.dataset.src;
+    document.querySelectorAll("#p-src button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    if (!selected || !series) return;
+    const token = seriesToken;
+    if ((await loadPrecip(selected, token)) === false) return;
+    xZoom = null; setRange(); drawChart();
+  });
 
   function drawChart() {
     destroyPlot();
@@ -404,7 +427,7 @@
       };
       $("#chart-hint").hidden = true;
     } else {
-      const isQ = chartMode === "q", s = isQ ? series.q : series.p;
+      const isQ = chartMode === "q", s = isQ ? series.q : curP();
       const n = s.values.length, t0 = Date.parse(s.start + "T00:00:00Z") / 1000, xs = new Float64Array(n);
       for (let i = 0; i < n; i++) xs[i] = t0 + i * 86400;
       data = [xs, s.values];
@@ -416,12 +439,12 @@
         axes: [axis, Object.assign({}, axis, { size: 60, values: (u, vs) => vs.map((x) => nf(x, 0)) })],
         series: [{ label: lang === "pt" ? "Data" : "Date", value: (u, x) => (x == null ? "–" : fmtDate(new Date(x * 1000).toISOString().slice(0, 10))) },
           isQ ? { label: lang === "pt" ? "Vazão (m³/s)" : "Streamflow (m³/s)", stroke: cq, width: 1.2, fill: cq + "1f", value: (u, x) => (x == null ? "–" : nf(x, autoD(x))) }
-              : { label: lang === "pt" ? "Precipitação (mm)" : "Precipitation (mm)", stroke: cp, width: 0, fill: cp + "cc", paths: uPlot.paths.bars({ size: [1, 3], gap: 0 }), value: (u, x) => (x == null ? "–" : nf(x, 1)) }],
+              : { label: (lang === "pt" ? "Precipitação (mm) · " : "Precipitation (mm) · ") + P_LABEL[pAlt ? pSrc : "v1"], stroke: cp, width: 0, fill: cp + "cc", paths: uPlot.paths.bars({ size: [1, 3], gap: 0 }), value: (u, x) => (x == null ? "–" : nf(x, 1)) }],
         hooks: {
           setScale: [(u, k) => { if (k === "x") xZoom = [u.scales.x.min, u.scales.x.max]; }],
           // linha que separa a v1 (até set/2010) da prévia da v2
           draw: [(u) => {
-            if (serEnd(s) <= V1_END) return;
+            if (!isQ || serEnd(s) <= V1_END) return;
             const x = Math.round(u.valToPos(V1_END, "x", true));
             if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
             const g = u.ctx; g.save();
@@ -434,6 +457,7 @@
         },
       };
       $("#chart-hint").hidden = false;
+      $("#chart-hint").textContent = isQ ? t("zoom_hint") : (pMsg ? pMsg + " " : "") + t("zoom_hint_p");
     }
     plot = new uPlot(opts, data, el);
     // a legenda ocupa espaço: reajusta a altura
@@ -444,7 +468,7 @@
       plot.setScale("x", { min: r[0], max: r[1] });
       plot.over.addEventListener("dblclick", () => { xZoom = null; plot.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] }); });
     }
-    const st = chartMode === "p" ? series.p : series.q;
+    const st = chartMode === "p" ? curP() : series.q;
     const end = new Date(Date.parse(st.start + "T00:00:00Z") + (st.values.length - 1) * 86400000).toISOString().slice(0, 10);
     $("#series-sub").textContent = `${selected.name}/${selected.state} · ANA ${selected.ana} · ${fmtDate(st.start)} – ${fmtDate(end)}`;
   }
@@ -454,12 +478,12 @@
   $("#d-csv").addEventListener("click", async () => {
     const c = selected;
     if (!c) return;
-    const s = await D.series(c.id), rows = new Map();
+    const s = await D.series(c.id), rows = new Map(), p = series && selected === c ? curP() : s.p;
     const add = (ser, col) => { const t0 = Date.parse(ser.start + "T00:00:00Z"); ser.values.forEach((v, i) => { const d = new Date(t0 + i * 86400000).toISOString().slice(0, 10); if (!rows.has(d)) rows.set(d, {}); rows.get(d)[col] = v; }); };
-    add(s.p, "p"); add(s.q, "q");
+    add(p, "p"); add(s.q, "q");
     const lines = ["date,precipitation_mm,streamflow_m3s"];
     [...rows.keys()].sort().forEach((d) => { const r = rows.get(d); lines.push(`${d},${r.p ?? ""},${r.q ?? ""}`); });
-    download(`CABra_${c.id}_${c.ana}.csv`, `# CABra ${c.id} - ${c.name} (ANA ${c.ana})\n# CABra v1, https://doi.org/10.5281/zenodo.4070146\n` + lines.join("\n"));
+    download(`CABra_${c.id}_${c.ana}.csv`, `# CABra ${c.id} - ${c.name} (ANA ${c.ana})\n# Vazão: CABra v1 até 2010-09-30; depois, dados ANA processados (prévia da v2)\n# Chuva: ${P_LABEL[p === s.p ? "v1" : pSrc]}\n# CABra v1, https://doi.org/10.5281/zenodo.4070146\n` + lines.join("\n"));
   });
   function download(name, text) {
     const a = document.createElement("a");

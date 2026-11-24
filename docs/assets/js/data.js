@@ -32,5 +32,8 @@
     boundary: (id) => getJSON(`boundaries/${id}.json`),
     // {q: {start, unit, values[]}, p: {start, unit, values[]}}
     series: (id) => getJSON(`series/${id}.json`),
+    // chuva diária de outra fonte, série completa de uma só origem: {start, unit, source, values[]}
+    // src: "brdwgd" (Xavier atualizado) ou "chirps"
+    precip: (id, src) => getJSON(`precip/${src}/${id}.json`),
   };
 })();
