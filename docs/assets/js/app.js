@@ -30,22 +30,25 @@
   const loc = () => (lang === "pt" ? "pt-BR" : "en-US");
   const nf = (v, d = 0) => (v === null || v === undefined || v === "" || Number.isNaN(+v) ? "–"
     : Number(v).toLocaleString(loc(), { maximumFractionDigits: d, minimumFractionDigits: d }));
+  const autoD = (v) => (Math.abs(v) >= 100 ? 0 : Math.abs(v) >= 10 ? 1 : 2);
   const biomeName = (b) => (t("biome")[b] || b);
   const hregName = (h) => h.replace(/([a-z])([A-Z])/g, "$1 $2");
   const esc = (s) => String(s).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+  const fmtDate = (s) => { const [y, m, d] = s.split("-"); return lang === "pt" ? `${d}/${m}/${y}` : `${y}-${m}-${d}`; };
 
   // ------------------------------------------------------------------ estado
   let catchments = [];
   let byId = new Map();
   let attributes = null;
+  let attrIndex = {};          // classe -> Map(id -> {coluna: valor})
   let selected = null;
+  let filters = { state: "", biome: "" };
 
   // ------------------------------------------------------------------ mapa
-  const map = L.map("map", { zoomControl: false, preferCanvas: true, minZoom: 3 }).setView([-15, -52], 4);
-  L.control.zoom({ position: "topright" }).addTo(map);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png", {
+  const map = L.map("leaflet-map", { zoomControl: true, preferCanvas: true, minZoom: 3 }).setView([-15, -52], 4);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
-    subdomains: "abcd", maxZoom: 18, opacity: 0.9,
+    subdomains: "abcd", maxZoom: 18,
   }).addTo(map);
   const canvas = L.canvas({ padding: 0.3 });
   const outlineLayer = L.layerGroup().addTo(map);
@@ -53,28 +56,22 @@
   let boundaryLayer = null;
   const markers = new Map();
 
-  // paletas pensadas para fundo escuro
-  const BIOME_COLORS = {
-    Amazon: "#4fae6f", Atlanticforest: "#69c3e0", Cerrado: "#d8b470",
-    Caatinga: "#c8643f", Pampa: "#a99be0", Pantanal: "#e7e3da",
-  };
-  const RAMPS = {
-    wet: ["#c8643f", "#d8b470", "#e7e3da", "#8fd0e4", "#3b8fc4"],
-    dry: ["#3b8fc4", "#8fd0e4", "#e7e3da", "#d8b470", "#c8643f"],
-    seq: ["#2a3b4a", "#3b6f8f", "#69c3e0", "#c5ecf6"],
-    hot: ["#2a3b4a", "#7a5a3a", "#d8b470", "#f3e1b5"],
-    green: ["#2a3b4a", "#2f6b4a", "#4fae6f", "#b9e3a8"],
-  };
+  const BIOME_COLORS = { Amazon: "#22c55e", Atlanticforest: "#62cbff", Cerrado: "#eab308", Caatinga: "#f97316", Pampa: "#a78bfa", Pantanal: "#e9effc" };
+  const RAMP = ["#0b2a5b", "#005adf", "#3d8bff", "#62cbff", "#bfe9ff"];
+  const RAMP_DRY = ["#62cbff", "#3d8bff", "#a78bfa", "#eab308", "#f97316"];
   const VARIABLES = {
-    aridity: { key: "aridity", d: 2, ramp: "dry" },
-    prec: { key: "prec", d: 0, ramp: "wet", unit: "u_prec" },
-    qmean: { key: "qmean", d: 2, ramp: "seq", unit: "u_qmean" },
-    area: { key: "area", d: 0, ramp: "seq", unit: "u_area" },
-    hdi: { key: "hdi", d: 2, ramp: "hot" },
-    forest: { get: (c) => c.cover.forest, d: 0, ramp: "green", unit: "u_forest" },
+    none: {},
+    aridity: { key: "aridity", d: 2, ramp: RAMP_DRY },
+    prec: { key: "prec", d: 0, ramp: RAMP },
+    qmean: { key: "qmean", d: 2, ramp: RAMP },
+    area: { key: "area", d: 0, ramp: RAMP },
+    hdi: { key: "hdi", d: 2, ramp: RAMP_DRY },
+    forest: { get: (c) => c.cover.forest, d: 0, ramp: ["#0b2a5b", "#14532d", "#16a34a", "#4ade80", "#bbf7d0"] },
     biome: { cat: true },
   };
-  let colorBy = "aridity";
+  let colorBy = "none";
+  const POINT = { fill: "#3d8bff", stroke: "#62cbff" };
+  const SEL = "#ef4444";
 
   const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
   function rampColor(ramp, x) {
@@ -87,29 +84,31 @@
 
   function colorFn() {
     const v = VARIABLES[colorBy];
+    if (colorBy === "none") return { fn: () => POINT.fill, none: true };
     if (v.cat) return { cat: true, fn: (c) => BIOME_COLORS[c.biome] || "#888" };
     const get = v.get || ((c) => c[v.key]);
-    const ramp = RAMPS[v.ramp];
     const vals = catchments.map(get).filter((x) => x !== null && !isNaN(x)).sort((a, b) => a - b);
-    // cor pelo percentil: legível mesmo com distribuições muito assimétricas (ex.: área)
-    const rank = (x) => {
+    const rank = (x) => {   // cor pelo percentil: legível mesmo com distribuições assimétricas
       let lo = 0, hi = vals.length - 1;
       while (lo < hi) { const m = (lo + hi) >> 1; if (vals[m] < x) lo = m + 1; else hi = m; }
       return lo / (vals.length - 1);
     };
     const q = (p) => vals[Math.round(p * (vals.length - 1))];
-    return { fn: (c) => (get(c) === null ? "#555" : rampColor(ramp, rank(get(c)))), q, d: v.d, ramp, unit: v.unit };
+    return { fn: (c) => (get(c) === null ? "#555" : rampColor(v.ramp, rank(get(c)))), q, d: v.d, ramp: v.ramp };
   }
+
+  const visible = (c) => (!filters.state || c.state === filters.state) && (!filters.biome || c.biome === filters.biome);
 
   function drawPoints() {
     const cf = colorFn();
     pointsLayer.clearLayers();
     markers.clear();
-    catchments.forEach((c) => {
+    catchments.filter(visible).forEach((c) => {
       const m = L.circleMarker([c.lat, c.lon], {
-        renderer: canvas, radius: 4, weight: 1, color: "#0e1114", fillColor: cf.fn(c), fillOpacity: 1,
+        renderer: canvas, radius: 5, weight: 1, color: cf.none ? POINT.stroke : "#050d1f", fillColor: cf.fn(c), fillOpacity: 0.9,
       });
-      m.bindTooltip(`<b>${esc(c.name)}</b> <span>${c.state} · ${c.id}</span>`, { direction: "top", offset: [0, -5] });
+      m._fill = cf.fn(c);
+      m.bindTooltip(`<b>${c.ana} - ${esc(c.name.toUpperCase())}</b><span>CABra ${c.id} · ${c.state} · ${nf(c.area)} km²</span>`, { direction: "top", offset: [0, -6] });
       m.on("click", () => go(`#map/${c.id}`));
       m.addTo(pointsLayer);
       markers.set(c.id, m);
@@ -119,46 +118,44 @@
   }
 
   function drawLegend(cf) {
-    $("#colorby").innerHTML = Object.keys(VARIABLES).map((k) =>
-      `<button type="button" role="radio" aria-checked="${k === colorBy}" data-k="${k}" class="${k === colorBy ? "on" : ""}">${t("v_" + k)}</button>`).join("");
+    $("#colorby").innerHTML = Object.keys(VARIABLES).map((k) => `<option value="${k}" ${k === colorBy ? "selected" : ""}>${t("v_" + k)}</option>`).join("");
     const body = $("#legend-body");
-    if (cf.cat) {
-      body.innerHTML = `<div class="cats">${Object.keys(BIOME_COLORS).map((b) => `<span style="--c:${BIOME_COLORS[b]}">${biomeName(b)}</span>`).join("")}</div>`;
-    } else {
-      const u = cf.unit ? ` ${t(cf.unit)}` : "";
-      body.innerHTML = `<div class="ramp" style="background:linear-gradient(90deg,${cf.ramp.join(",")})"></div>
-        <div class="scale"><span>${nf(cf.q(0), cf.d)}</span><span>${nf(cf.q(0.5), cf.d)}</span><span>${nf(cf.q(1), cf.d)}${u}</span></div>`;
-    }
+    if (cf.none) body.innerHTML = "";
+    else if (cf.cat) body.innerHTML = `<div class="cats">${Object.keys(BIOME_COLORS).map((b) => `<span style="--c:${BIOME_COLORS[b]}">${biomeName(b)}</span>`).join("")}</div>`;
+    else body.innerHTML = `<div class="rampa" style="background:linear-gradient(90deg,${cf.ramp.join(",")})"></div>
+      <div class="escala"><span>${nf(cf.q(0), cf.d)}</span><span>${nf(cf.q(0.5), cf.d)}</span><span>${nf(cf.q(1), cf.d)}</span></div>`;
   }
-  $("#colorby").addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    colorBy = b.dataset.k;
-    drawPoints();
-  });
+  $("#colorby").addEventListener("change", (e) => { colorBy = e.target.value; drawPoints(); });
 
   function highlight(id) {
-    markers.forEach((m, k) => m.setStyle(k === id ? { radius: 7, weight: 2, color: "#ece7dc" } : { radius: 4, weight: 1, color: "#0e1114" }));
+    markers.forEach((m, k) => {
+      if (k === id) m.setStyle({ radius: 8, weight: 2, color: "#fff", fillColor: SEL, fillOpacity: 1 });
+      else m.setStyle({ radius: 5, weight: 1, color: colorBy === "none" ? POINT.stroke : "#050d1f", fillColor: m._fill, fillOpacity: 0.9 });
+    });
     const m = markers.get(id);
     if (m) m.bringToFront();
   }
 
   function fitAll() {
-    if (!catchments.length) return;
-    map.fitBounds(L.latLngBounds(catchments.map((c) => [c.lat, c.lon])), { padding: [30, 30] });
+    const cs = catchments.filter(visible);
+    if (!cs.length) return;
+    map.fitBounds(L.latLngBounds(cs.map((c) => [c.lat, c.lon])), { padding: [30, 30], maxZoom: 8 });
   }
 
-  // contornos de todas as bacias como fundo (o próprio banco desenha o mapa)
+  // contornos de todas as bacias, bem discretos, como referência
   D.outlines().then((fc) => {
-    const layer = L.geoJSON(fc, {
-      renderer: canvas, interactive: false,
-      style: { color: "#ece7dc", weight: 0.5, opacity: 0.22, fillColor: "#69c3e0", fillOpacity: 0.025 },
-    }).addTo(outlineLayer);
-    // os contornos de fundo são bem simplificados: somem aos poucos com o zoom
-    const fade = () => { const z = map.getZoom(); layer.setStyle({ opacity: z >= 8 ? 0.06 : z >= 6 ? 0.14 : 0.22 }); };
-    map.on("zoomend", fade);
-    fade();
+    L.geoJSON(fc, { renderer: canvas, interactive: false, style: { color: "#3d8bff", weight: 0.5, opacity: 0.25, fillOpacity: 0 } }).addTo(outlineLayer);
   }).catch(() => { /* opcional */ });
+
+  // ------------------------------------------------------------------ filtros
+  function renderFilters() {
+    const states = [...new Set(catchments.map((c) => c.state))].sort();
+    $("#f-state").innerHTML = `<option value="">${t("all_states")}</option>` + states.map((s) => `<option ${s === filters.state ? "selected" : ""}>${s}</option>`).join("");
+    const biomes = Object.keys(BIOME_COLORS);
+    $("#f-biome").innerHTML = `<option value="">${t("all_biomes")}</option>` + biomes.map((b) => `<option value="${b}" ${b === filters.biome ? "selected" : ""}>${biomeName(b)}</option>`).join("");
+  }
+  $("#f-state").addEventListener("change", (e) => { filters.state = e.target.value; drawPoints(); fitAll(); });
+  $("#f-biome").addEventListener("change", (e) => { filters.biome = e.target.value; drawPoints(); fitAll(); });
 
   // ------------------------------------------------------------------ busca
   const search = $("#search"), results = $("#search-results");
@@ -167,7 +164,7 @@
   search.addEventListener("input", () => {
     const q = norm(search.value.trim());
     if (!q) { results.hidden = true; return; }
-    hits = catchments.filter((c) => norm(c.name).includes(q) || String(c.ana).startsWith(q) || String(c.id) === q).slice(0, 12);
+    hits = catchments.filter((c) => visible(c) && (norm(c.name).includes(q) || String(c.ana).startsWith(q) || String(c.id) === q || norm(c.state) === q)).slice(0, 15);
     hitIdx = 0;
     renderHits();
   });
@@ -181,22 +178,83 @@
   function renderHits() {
     results.hidden = hits.length === 0;
     results.innerHTML = hits.map((c, i) =>
-      `<li data-id="${c.id}" class="${i === hitIdx ? "on" : ""}"><span>${esc(c.name)}</span><small>${c.state} · ${c.ana}</small></li>`).join("");
+      `<li data-id="${c.id}" class="${i === hitIdx ? "on" : ""}"><span><b>${c.ana}</b>${esc(c.name.toUpperCase())}</span><small>${c.state} · CABra ${c.id}</small></li>`).join("");
   }
-  results.addEventListener("mousedown", (e) => {
-    const li = e.target.closest("li");
-    if (li) pick(+li.dataset.id);
-  });
+  results.addEventListener("mousedown", (e) => { const li = e.target.closest("li"); if (li) pick(+li.dataset.id); });
   function pick(id) { results.hidden = true; search.value = ""; search.blur(); go(`#map/${id}`); }
   search.addEventListener("blur", () => setTimeout(() => { results.hidden = true; }, 150));
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && selected && document.activeElement !== search) go("#map");
-    if (e.key === "/" && document.activeElement.tagName !== "INPUT") { e.preventDefault(); search.focus(); }
-  });
 
   // ------------------------------------------------------------------ detalhe
-  let plots = [];
-  let seriesToken = 0;
+  const TABS = [
+    { k: "q", blocks: [{ title: "blk_sig", cls: "streamflow", cols: ["q_mean", "q_95", "q_5", "q_1", "q_99", "baseflow_index", "runoff_coef", "q_elasticity", "fdc_slope", "q_cv", "q_hfd", "q_zero"] }] },
+    { k: "clim", blocks: [{ title: "blk_clim", cls: "climate", cols: ["clim_p", "clim_pet", "clim_et", "aridity_index", "p_seasonality", "clim_tmin", "clim_tmax", "clim_rh", "clim_srad", "clim_wind"] }] },
+    { k: "land", blocks: [{ title: "blk_cover", special: "cover" }, { title: "blk_soil", special: "soil" }, { title: "blk_soilattr", cls: "soil", cols: ["soil_type", "soil_textclass", "soil_depth", "soil_carbon", "soil_bulk"] }, { title: "", cls: "landcover", cols: ["cover_main", "ndvi_djf", "ndvi_jja"] }] },
+    { k: "phys", blocks: [{ title: "blk_topo", cls: "topography", cols: ["elev_mean", "elev_min", "elev_max", "elev_gauge", "catch_slope", "catch_order"] }, { title: "blk_geo", cls: "geology", cols: ["catch_lith", "sub_porosity", "sub_permeability", "sub_hconduc"], more: { cls: "groundwater", cols: ["aquif_name", "aquif_type", "catch_wtd", "catch_hand"] } }] },
+    { k: "dist", blocks: [{ title: "blk_dist", cls: "disturbance", cols: ["hdisturb_index", "res_number", "res_area", "res_volume", "res_regulation", "water_demand", "cover_urban", "cover_crops", "dist_urban"] }] },
+  ];
+  let activeTab = "q";
+
+  function unitOf(cls, col) {
+    const a = attributes[cls];
+    const i = a.columns.indexOf(col);
+    return i >= 0 ? a.units[i] : "";
+  }
+  function metricCells(cls, cols, id) {
+    const row = attrIndex[cls].get(id) || {};
+    return cols.filter((c) => c in row).map((c) => {
+      const v = row[c];
+      const isTxt = typeof v === "string";
+      const u = unitOf(cls, c);
+      const val = v === null ? "–" : isTxt ? esc(v) : `${nf(v, autoD(v))}${u ? `<small>${esc(u)}</small>` : ""}`;
+      return `<div class="metric-card" title="${c}"><span class="metric-label">${t("labels")[c] || c}</span><span class="metric-value${isTxt ? " txt" : ""}">${val}</span></div>`;
+    }).join("");
+  }
+
+  const COVER_COLORS = { forest: "#22c55e", grass: "#a3e635", shrub: "#84cc16", crops: "#eab308", urban: "#93a3c4", waterp: "#62cbff", bare: "#f97316" };
+  const SOIL_COLORS = { sand: "#fcd34d", silt: "#d97706", clay: "#92400e" };
+  const barras = (pairs, colors, label) => `<div class="barras">${pairs.map(([k, v]) =>
+    `<div class="barra-l"><span>${label(k)}</span><div class="trilho"><i style="width:${Math.min(100, Math.max(0, v))}%;background:${colors[k]}"></i></div><b>${nf(v, 0)}%</b></div>`).join("")}</div>`;
+
+  function renderTabBody() {
+    const c = selected;
+    if (!c || !attributes) return;
+    $("#d-tabs").innerHTML = TABS.map((tb) => `<li><button type="button" class="tab-button ${tb.k === activeTab ? "active" : ""}" data-k="${tb.k}">${t("tab_" + tb.k)}</button></li>`).join("");
+    const tab = TABS.find((x) => x.k === activeTab);
+    $("#d-tab-body").innerHTML = tab.blocks.map((b) => {
+      let inner = "";
+      if (b.special === "cover") {
+        const pairs = Object.entries(c.cover).filter(([, v]) => v !== null && v >= 0.5).sort((x, y) => y[1] - x[1]);
+        inner = barras(pairs, COVER_COLORS, (k) => t("c_" + k));
+      } else if (b.special === "soil") {
+        inner = barras(["sand", "silt", "clay"].map((k) => [k, c.soil[k]]), SOIL_COLORS, (k) => t("s_" + k));
+      } else {
+        inner = `<div class="metrics-grid">${metricCells(b.cls, b.cols, c.id)}${b.more ? metricCells(b.more.cls, b.more.cols, c.id) : ""}</div>`;
+      }
+      return `<div class="bloco">${b.title ? `<h4>${t(b.title)}</h4>` : ""}${inner}</div>`;
+    }).join("");
+  }
+  $("#d-tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    activeTab = b.dataset.k;
+    renderTabBody();
+  });
+
+  const IC = {
+    area: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M4 7l5-3 6 3 5-3v13l-5 3-6-3-5 3z M9 4v13 M15 7v13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M12 21s-6.5-6.2-6.5-11.2a6.5 6.5 0 0 1 13 0C18.5 14.8 12 21 12 21Z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9.8" r="2.3" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3.5 12h17M12 3.5c2.5 2.6 3.6 5.4 3.6 8.5s-1.1 5.9-3.6 8.5c-2.5-2.6-3.6-5.4-3.6-8.5S9.5 6.1 12 3.5Z" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
+  };
+
+  function renderDetail() {
+    const c = selected;
+    if (!c) return;
+    $("#d-name").innerHTML = `${c.ana} - ${esc(c.name.toUpperCase())}<small>CABra ${c.id} · ${c.state} · ${biomeName(c.biome)} · ${hregName(c.hreg)}</small>`;
+    $("#d-meta").innerHTML = [
+      [IC.area, t("m_area"), `${nf(c.area, 1)} km²`], [IC.pin, t("m_lat"), nf(c.lat, 5)], [IC.globe, t("m_lon"), nf(c.lon, 5)],
+    ].map(([ic, l, v]) => `<div>${ic}<p><span>${l}</span><b>${v}</b></p></div>`).join("");
+    renderTabBody();
+  }
 
   async function select(id) {
     const c = byId.get(id);
@@ -204,121 +262,111 @@
     selected = c;
     $("#intro").hidden = true;
     $("#detail").hidden = false;
-    $("#panel").scrollTop = 0;
-    $("#view-map").scrollTop = 0;
+    $("#d-csv").disabled = false;
     renderDetail();
     highlight(id);
-
     const geom = await D.boundary(id);
     if (selected !== c) return;
     if (boundaryLayer) map.removeLayer(boundaryLayer);
-    boundaryLayer = L.geoJSON(geom, {
-      style: { color: "#ece7dc", weight: 1.5, fillColor: "#69c3e0", fillOpacity: 0.14 }, interactive: false,
-    }).addTo(map);
-    map.flyToBounds(boundaryLayer.getBounds(), { padding: [40, 40], maxZoom: 9, duration: 0.6 });
+    boundaryLayer = L.geoJSON(geom, { style: { color: "#62cbff", weight: 2, fillColor: "#3d8bff", fillOpacity: 0.18 }, interactive: false }).addTo(map);
+    map.flyToBounds(boundaryLayer.getBounds(), { padding: [30, 30], maxZoom: 10, duration: 0.6 });
     loadSeries(c);
   }
-
-  const COVER_COLORS = { forest: "#4fae6f", grass: "#b9d77a", shrub: "#8a9a5b", crops: "#d8b470", urban: "#9aa1a8", waterp: "#69c3e0", bare: "#c8643f", other: "#3a4148" };
-  const SOIL_COLORS = { sand: "#e4c88f", silt: "#b08a5c", clay: "#7a4e33" };
-
-  function stack(parts, colors, label) {
-    const bar = parts.map(([k, v]) => `<i style="width:${v}%;background:${colors[k]}" title="${label(k)} ${nf(v, 0)}%"></i>`).join("");
-    const li = parts.filter(([, v]) => v >= 0.5).map(([k, v]) => `<li style="--c:${colors[k]}">${label(k)}<b>${nf(v, 0)}%</b></li>`).join("");
-    return `<div class="bar">${bar}</div><ul>${li}</ul>`;
-  }
-
-  function renderDetail() {
-    const c = selected;
-    if (!c) return;
-    $("#d-kicker").textContent = `CABra ${String(c.id).padStart(3, "0")} · ${c.state} · ${biomeName(c.biome)}`;
-    $("#d-name").textContent = c.name;
-    $("#d-sub").textContent = `${hregName(c.hreg)} · ${nf(c.lat, 3)}°, ${nf(c.lon, 3)}°`;
-    const facts = [
-      ["f_ana", c.ana, ""], ["f_area", nf(c.area), "km²"],
-      ["f_prec", nf(c.prec), t("u_prec")], ["f_qmean", nf(c.qmean, 2), t("u_qmean")],
-      ["f_aridity", nf(c.aridity, 2), ""], ["f_elev", nf(c.elev), "m"],
-      ["f_hdi", nf(c.hdi, 2), ""], ["f_missing", nf(c.missing, 1), "%"],
-    ];
-    $("#d-facts").innerHTML = facts.map(([k, v, u]) => `<div><dt>${t(k)}</dt><dd>${v}${u ? `<small>${u}</small>` : ""}</dd></div>`).join("");
-
-    const cov = Object.entries(c.cover).filter(([, v]) => v !== null).sort((a, b) => b[1] - a[1]);
-    const rest = Math.max(0, 100 - cov.reduce((s, [, v]) => s + v, 0));
-    if (rest >= 0.5) cov.push(["other", rest]);
-    $("#d-cover").innerHTML = stack(cov, COVER_COLORS, (k) => t("c_" + k));
-    const tot = (c.soil.sand || 0) + (c.soil.silt || 0) + (c.soil.clay || 0) || 1;
-    $("#d-soil").innerHTML = stack(["sand", "silt", "clay"].map((k) => [k, (c.soil[k] || 0) * 100 / tot]), SOIL_COLORS, (k) => t("s_" + k));
-  }
-
-  // mesmo eixo de tempo nos dois gráficos (período completo da v1)
-  const X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
-
-  async function loadSeries(c) {
-    const token = ++seriesToken;
-    plots.forEach((p) => p.destroy());
-    plots = [];
-    ["#chart-p", "#chart-q"].forEach((s) => { const el = $(s); el.classList.add("loading"); el.textContent = t("loading"); });
-    const s = await D.series(c.id);
-    if (token !== seriesToken) return;
-    ["#chart-p", "#chart-q"].forEach((sel) => { const el = $(sel); el.classList.remove("loading"); el.textContent = ""; });
-    plots = [
-      timePlot($("#chart-p"), s.p, { color: "#69c3e0", bars: true, height: 92, invert: true, xAxis: false }),
-      timePlot($("#chart-q"), s.q, { color: "#ece7dc", bars: false, height: 132, invert: false, xAxis: true }),
-    ];
-  }
-
-  function timePlot(el, s, o) {
-    const n = s.values.length;
-    const t0 = Date.parse(s.start + "T00:00:00Z") / 1000;
-    const xs = new Float64Array(n);
-    for (let i = 0; i < n; i++) xs[i] = t0 + i * 86400;
-    const axis = { stroke: "#8d949b", grid: { stroke: "#20262c", width: 1 }, ticks: { show: false }, font: "10.5px 'Plex Mono', monospace", gap: 4 };
-    const opts = {
-      width: el.clientWidth || 380, height: o.height, padding: [8, 4, 0, 0],
-      tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
-      legend: { show: false },
-      cursor: { drag: { x: true, y: false, setScale: false }, points: { show: false }, sync: { key: "cabra" }, y: false },
-      scales: { x: { time: true, range: (u, mn, mx) => [mn, mx] }, y: { dir: o.invert ? -1 : 1, range: (u, mn, mx) => [0, (mx || 1) * 1.05] } },
-      axes: [
-        Object.assign({}, axis, { show: o.xAxis, size: 26 }),
-        Object.assign({}, axis, { size: 44, values: (u, vs) => vs.map((v) => nf(v, 0)) }),
-      ],
-      series: [
-        {},
-        {
-          stroke: o.color, width: o.bars ? 0 : 1, fill: o.bars ? o.color + "aa" : "rgba(236,231,220,.06)",
-          paths: o.bars ? uPlot.paths.bars({ size: [1, 3], gap: 0 }) : undefined,
-        },
-      ],
-      hooks: {
-        setSelect: [(u) => {
-          if (u.select.width < 4) return;
-          const min = u.posToVal(u.select.left, "x"), max = u.posToVal(u.select.left + u.select.width, "x");
-          plots.forEach((p) => p.batch(() => { p.setScale("x", { min, max }); p.setSelect({ width: 0, height: 0 }, false); }));
-        }],
-      },
-    };
-    const u = new uPlot(opts, [xs, s.values], el);
-    u.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] });
-    u.over.addEventListener("dblclick", () => plots.forEach((p) => p.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] })));
-    u._el = el;
-    u._h = o.height;
-    return u;
-  }
-
-  window.addEventListener("resize", () => plots.forEach((p) => p.setSize({ width: p._el.clientWidth, height: p._h })));
-  $("#d-close").addEventListener("click", () => go("#map"));
 
   function clearSelection() {
     selected = null;
     seriesToken++;
-    plots.forEach((p) => p.destroy());
-    plots = [];
+    destroyPlot();
     if (boundaryLayer) { map.removeLayer(boundaryLayer); boundaryLayer = null; }
     $("#detail").hidden = true;
     $("#intro").hidden = false;
+    $("#d-csv").disabled = true;
+    $("#chart").innerHTML = `<div class="vazio">${t("chart_empty")}</div>`;
+    $("#chart-title").innerHTML = "";
+    $("#chart-hint").hidden = true;
     highlight(-1);
   }
+  $("#d-close").addEventListener("click", () => go("#map"));
+
+  // ------------------------------------------------------------------ gráfico
+  let plot = null, series = null, chartMode = "q", seriesToken = 0, xZoom = null;
+  const X_RANGE = [Date.parse("1980-01-01T00:00:00Z") / 1000, Date.parse("2010-12-31T00:00:00Z") / 1000];
+
+  function destroyPlot() { if (plot) { plot.destroy(); plot = null; } }
+
+  async function loadSeries(c) {
+    const token = ++seriesToken;
+    destroyPlot();
+    xZoom = null;
+    $("#chart").innerHTML = `<div class="vazio">${t("loading")}</div>`;
+    const s = await D.series(c.id);
+    if (token !== seriesToken) return;
+    series = s;
+    drawChart();
+  }
+
+  document.querySelectorAll("#chart-modes button").forEach((b) => b.addEventListener("click", () => {
+    chartMode = b.dataset.mode;
+    document.querySelectorAll("#chart-modes button").forEach((x) => x.classList.toggle("on", x === b));
+    if (selected && series) drawChart();
+  }));
+
+  const axis = { stroke: "#93a3c4", grid: { stroke: "#13284f", width: 1 }, ticks: { stroke: "#13284f", width: 1 }, font: "11px 'Exo 2', sans-serif" };
+
+  function drawChart() {
+    destroyPlot();
+    const el = $("#chart");
+    el.innerHTML = "";
+    const w = el.clientWidth, h = el.clientHeight;
+    let opts, data;
+    if (chartMode === "fdc") {
+      const v = series.q.values.filter((x) => x !== null && x > 0).sort((a, b) => b - a);
+      const n = v.length, step = Math.max(1, Math.floor(n / 800));
+      const xs = [], ys = [];
+      for (let i = 0; i < n; i += step) { xs.push(((i + 1) / (n + 1)) * 100); ys.push(v[i]); }
+      xs.push((n / (n + 1)) * 100); ys.push(v[n - 1]);
+      data = [xs, ys];
+      opts = {
+        width: w, height: h, legend: { show: false }, cursor: { drag: { x: false, y: false }, points: { size: 6, fill: "#62cbff" } },
+        scales: { x: { time: false, range: [0, 100] }, y: { distr: 3 } },
+        axes: [Object.assign({}, axis, { values: (u, vs) => vs.map((x) => x + "%") }), Object.assign({}, axis, { size: 56, values: (u, vs) => vs.map((x) => nf(x, x < 1 ? 2 : 0)) })],
+        series: [{}, { stroke: "#62cbff", width: 2, fill: "rgba(98,203,255,0.08)" }],
+      };
+      $("#chart-title").innerHTML = `<i style="background:#62cbff"></i>${t("t_fdc")}`;
+      $("#chart-hint").hidden = true;
+    } else {
+      const s = chartMode === "q" ? series.q : series.p;
+      const n = s.values.length, t0 = Date.parse(s.start + "T00:00:00Z") / 1000;
+      const xs = new Float64Array(n);
+      for (let i = 0; i < n; i++) xs[i] = t0 + i * 86400;
+      data = [xs, s.values];
+      const isQ = chartMode === "q";
+      opts = {
+        width: w, height: h, legend: { show: false },
+        tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
+        cursor: { drag: { x: true, y: false, setScale: true }, points: { show: false } },
+        scales: { x: { time: true }, y: { range: (u, mn, mx) => [0, (mx || 1) * 1.05] } },
+        axes: [axis, Object.assign({}, axis, { size: 56, values: (u, vs) => vs.map((x) => nf(x, 0)) })],
+        series: [{}, isQ
+          ? { stroke: "#62cbff", width: 1.2, fill: "rgba(98,203,255,0.10)" }
+          : { stroke: "#3d8bff", width: 0, fill: "rgba(0,90,223,0.75)", paths: uPlot.paths.bars({ size: [1, 3], gap: 0 }) }],
+        hooks: { setScale: [(u, k) => { if (k === "x") xZoom = [u.scales.x.min, u.scales.x.max]; }] },
+      };
+      $("#chart-title").innerHTML = `<i style="background:${isQ ? "#62cbff" : "#005adf"}"></i>${t(isQ ? "t_q" : "t_p")}`;
+      $("#chart-hint").hidden = false;
+    }
+    plot = new uPlot(opts, data, el);
+    if (chartMode !== "fdc") {
+      const r = xZoom || X_RANGE;
+      plot.setScale("x", { min: r[0], max: r[1] });
+      plot.over.addEventListener("dblclick", () => { xZoom = null; plot.setScale("x", { min: X_RANGE[0], max: X_RANGE[1] }); });
+    }
+    const st = chartMode === "p" ? series.p : series.q;
+    const end = new Date(Date.parse(st.start + "T00:00:00Z") + (st.values.length - 1) * 86400000).toISOString().slice(0, 10);
+    $("#period").textContent = `${fmtDate(st.start)} – ${fmtDate(end)}`;
+  }
+  let rT;
+  window.addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(() => { if (plot && series) drawChart(); map.invalidateSize(); }, 150); });
 
   $("#d-csv").addEventListener("click", async () => {
     const c = selected;
@@ -336,11 +384,8 @@
     add(s.p, "p");
     add(s.q, "q");
     const lines = ["date,precipitation_mm,streamflow_m3s"];
-    [...rows.keys()].sort().forEach((d) => {
-      const r = rows.get(d);
-      lines.push(`${d},${r.p ?? ""},${r.q ?? ""}`);
-    });
-    download(`CABra_${c.id}_series.csv`, `# CABra ${c.id} - ${c.name} (ANA ${c.ana})\n# CABra v1, https://doi.org/10.5281/zenodo.4070146\n` + lines.join("\n"));
+    [...rows.keys()].sort().forEach((d) => { const r = rows.get(d); lines.push(`${d},${r.p ?? ""},${r.q ?? ""}`); });
+    download(`CABra_${c.id}_${c.ana}.csv`, `# CABra ${c.id} - ${c.name} (ANA ${c.ana})\n# CABra v1, https://doi.org/10.5281/zenodo.4070146\n` + lines.join("\n"));
   });
 
   function download(name, text) {
@@ -357,12 +402,10 @@
   let tClass = "general", tSort = { col: 0, dir: 1 }, tFilter = "";
 
   function renderClasses() {
-    $("#classes").innerHTML = CLASS_KEYS.map((k) => `<button type="button" role="tab" data-k="${k}" class="${k === tClass ? "on" : ""}">${t("cls_" + k)}</button>`).join("");
+    $("#classes").innerHTML = CLASS_KEYS.map((k) => `<li><button type="button" class="tab-button ${k === tClass ? "active" : ""}" data-k="${k}">${t("cls_" + k)}</button></li>`).join("");
+    $("#about-classes").innerHTML = CLASS_KEYS.map((k) => `<li>${t("cls_" + k)}</li>`).join("");
   }
-  $("#classes").addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (b) go(`#attributes/${b.dataset.k}`);
-  });
+  $("#classes").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) go(`#attributes/${b.dataset.k}`); });
   $("#tfilter").addEventListener("input", (e) => { tFilter = norm(e.target.value.trim()); renderTable(); });
 
   function renderTable() {
@@ -377,29 +420,23 @@
       if (b1 === null) return -1;
       return (typeof a1 === "number" && typeof b1 === "number" ? a1 - b1 : String(a1).localeCompare(String(b1))) * dir;
     });
+    const labels = t("labels");
     const head = a.columns.map((c, i) =>
-      `<th data-i="${i}" class="${i === col ? "sorted" : ""}">${esc(c)}${i === col ? (dir > 0 ? " ↑" : " ↓") : ""}<small>${a.units[i] ? esc(a.units[i]) : "&nbsp;"}</small></th>`).join("");
-    const body = rows.map((r) =>
-      `<tr data-id="${r[0]}">${r.map((v) => `<td class="${typeof v === "string" ? "txt" : ""}">${v === null ? "–" : esc(v)}</td>`).join("")}</tr>`).join("");
+      `<th data-i="${i}" class="${i === col ? "sorted" : ""}" title="${esc(c)}">${esc(labels[c] || c)}${i === col ? (dir > 0 ? " ↑" : " ↓") : ""}<small>${a.units[i] ? esc(a.units[i]) : esc(c)}</small></th>`).join("");
+    const body = rows.map((r) => `<tr data-id="${r[0]}">${r.map((v) => `<td class="${typeof v === "string" ? "txt" : ""}">${v === null ? "–" : esc(v)}</td>`).join("")}</tr>`).join("");
     $("#table").innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
     $("#tcount").textContent = t("rows_shown")(rows.length, a.rows.length);
   }
   $("#table").addEventListener("click", (e) => {
     const th = e.target.closest("th");
-    if (th) {
-      const i = +th.dataset.i;
-      tSort = { col: i, dir: tSort.col === i ? -tSort.dir : 1 };
-      renderTable();
-      return;
-    }
+    if (th) { const i = +th.dataset.i; tSort = { col: i, dir: tSort.col === i ? -tSort.dir : 1 }; renderTable(); return; }
     const tr = e.target.closest("tr[data-id]");
     if (tr) go(`#map/${tr.dataset.id}`);
   });
   $("#tcsv").addEventListener("click", () => {
     const a = attributes[tClass];
     const q = (v) => (v === null ? "" : typeof v === "string" && /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const lines = [a.columns.map(q).join(","), a.units.map(q).join(","), ...a.rows.map((r) => r.map(q).join(","))];
-    download(`CABra_${tClass}_attributes.csv`, lines.join("\n"));
+    download(`CABra_${tClass}_attributes.csv`, [a.columns.map(q).join(","), a.units.map(q).join(","), ...a.rows.map((r) => r.map(q).join(","))].join("\n"));
   });
 
   // ------------------------------------------------------------------ rotas
@@ -409,12 +446,13 @@
     const [view, arg] = (location.hash.slice(1) || "map").split("/");
     const v = ["map", "attributes", "about"].includes(view) ? view : "map";
     document.querySelectorAll(".view").forEach((el) => { el.hidden = el.id !== `view-${v}`; });
-    document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
+    document.querySelectorAll(".barra-acoes > a[data-view]").forEach((a) => a.classList.toggle("active", a.dataset.view === v));
     if (v === "map") {
-      map.invalidateSize();
-      if (arg && byId.has(+arg)) { if (!selected || selected.id !== +arg) select(+arg); }
-      else if (selected) { clearSelection(); fitAll(); }
-    }
+      setTimeout(() => map.invalidateSize(), 0);
+      if (arg && byId.has(+arg)) {
+        if (!selected || selected.id !== +arg) { select(+arg); if (window.innerWidth <= 960) window.scrollTo({ top: 0, behavior: "smooth" }); }
+      } else if (selected) { clearSelection(); fitAll(); }
+    } else window.scrollTo(0, 0);
     if (v === "attributes") {
       if (arg && CLASS_KEYS.includes(arg) && arg !== tClass) { tClass = arg; tSort = { col: 0, dir: 1 }; }
       renderClasses();
@@ -425,9 +463,11 @@
 
   function refreshAll() {
     drawPoints();
+    renderFilters();
     renderClasses();
     renderTable();
-    if (selected) { renderDetail(); loadSeries(selected); }
+    if (selected) { renderDetail(); if (series) drawChart(); }
+    else $("#chart").innerHTML = `<div class="vazio">${t("chart_empty")}</div>`;
   }
 
   // ------------------------------------------------------------------ início
@@ -437,10 +477,16 @@
     catchments = cs;
     byId = new Map(cs.map((c) => [c.id, c]));
     attributes = at;
+    for (const k of Object.keys(at)) {
+      const m = new Map();
+      at[k].rows.forEach((r) => { const o = {}; at[k].columns.forEach((c, i) => { o[c] = r[i]; }); m.set(r[0], o); });
+      attrIndex[k] = m;
+    }
+    renderFilters();
     drawPoints();
     if (!location.hash.startsWith("#map/")) fitAll();
     route();
   }).catch((err) => {
-    $("#intro").insertAdjacentHTML("beforeend", `<p style="color:#c8643f">Erro ao carregar dados: ${esc(err.message)}</p>`);
+    $("#intro").insertAdjacentHTML("beforeend", `<p class="dica" style="color:#ff6b7a">Erro ao carregar dados: ${esc(err.message)}</p>`);
   });
 })();
