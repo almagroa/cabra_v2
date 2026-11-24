@@ -307,7 +307,7 @@
         if (b.special === "cover") inner = hbars(Object.entries(c.cover).filter(([, v]) => v !== null && v >= 0.5).sort((x, y) => y[1] - x[1]), COVER_COLORS, (k) => t("c_" + k));
         else if (b.special === "soil") inner = hbars(["sand", "silt", "clay"].map((k) => [k, c.soil[k]]), SOIL_COLORS, (k) => t("s_" + k));
         else inner = `<dl class="facts">${facts(b.cls, b.cols, c.id)}${b.more ? facts(b.more.cls, b.more.cols, c.id) : ""}</dl>`;
-        return `${b.title ? `<div class="blk-title">${t(b.title)}</div>` : ""}${inner}`;
+        return `<div class="blk">${b.title ? `<div class="blk-title">${t(b.title)}</div>` : ""}${inner}</div>`;
       }).join("");
   }
   $("#d-tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { activeTab = b.dataset.k; renderAttrBox(); } });
@@ -316,8 +316,11 @@
     const c = byId.get(id);
     if (!c) return;
     selected = c;
-    $("#list-box").hidden = true;
-    $("#attr-box").hidden = false;
+    $("#list-panel").hidden = true;
+    $("#chart-panel").hidden = false;
+    $("#attr-panel").hidden = false;
+    $(".grid2").classList.add("sel");
+    map.invalidateSize();
     $("#d-csv").disabled = false;
     renderAttrBox(); renderKpis(); renderPicker(); highlight(id); renderPop(c);
     $("#series-sub").textContent = `${c.name}/${c.state} · ANA ${c.ana}`;
@@ -332,8 +335,11 @@
   function clearSelection() {
     selected = null; seriesToken++; destroyPlot();
     if (boundaryLayer) { map.removeLayer(boundaryLayer); boundaryLayer = null; }
-    $("#list-box").hidden = false;
-    $("#attr-box").hidden = true;
+    $("#list-panel").hidden = false;
+    $("#chart-panel").hidden = true;
+    $("#attr-panel").hidden = true;
+    $(".grid2").classList.remove("sel");
+    map.invalidateSize();
     $("#d-csv").disabled = true;
     $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`;
     $("#chart-hint").hidden = true;

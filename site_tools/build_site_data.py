@@ -45,7 +45,7 @@ def clean_unit(u):
     u = u.strip()
     for a, b in UNIT_FIX.items():
         u = u.replace(a, b)
-    return u.replace("¯¹", "⁻¹").replace("¯²", "⁻²").replace("¯³", "⁻³").replace("��", "⁻¹")
+    return u.replace("¯¹", "⁻¹").replace("¯²", "⁻²").replace("¯³", "⁻³").replace("��", "⁻¹").replace("\u00e2\u0080\u00b0", "‰")
 
 
 def num(v):

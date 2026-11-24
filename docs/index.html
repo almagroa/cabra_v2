@@ -63,37 +63,35 @@
           <div class="legend" id="legend"></div>
         </div>
 
-        <!-- lista (sem bacia) ou atributos (com bacia) -->
-        <div class="panel" id="side-panel">
-          <div id="list-box">
-            <header><h2 data-i18n="list_title">Bacias</h2><p id="list-sub"></p></header>
-            <input id="search" class="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar por nome, código ANA ou ID">
-            <div class="list" id="list"></div>
-          </div>
-          <div id="attr-box" hidden>
-            <header>
-              <h2 data-i18n="attr_basin">Atributos da bacia</h2>
-              <button class="btn" id="d-close" type="button" data-i18n="clear_sel">Limpar seleção</button>
-            </header>
-            <div class="seg wide" id="d-tabs" role="group"></div>
-            <div id="d-tab-body"></div>
-            <p class="note" data-i18n="disclaimer"></p>
-          </div>
+        <!-- sem bacia: lista; com bacia: gráficos -->
+        <div class="panel" id="list-panel">
+          <header><h2 data-i18n="list_title">Bacias</h2><p id="list-sub"></p></header>
+          <input id="search" class="search" type="search" autocomplete="off" spellcheck="false" data-i18n-ph="search_ph" placeholder="Buscar por nome, código ANA ou ID">
+          <div class="list" id="list"></div>
+        </div>
+        <div class="panel" id="chart-panel" hidden>
+          <header>
+            <h2 data-i18n="series_title">Séries diárias</h2>
+            <button class="btn" id="d-close" type="button" data-i18n="clear_sel">Limpar seleção</button>
+            <p id="series-sub" class="full"></p>
+            <div class="seg" id="chart-modes" role="group">
+              <button type="button" data-mode="q" aria-pressed="true" data-i18n="m_q">Hidrograma</button>
+              <button type="button" data-mode="p" aria-pressed="false" data-i18n="m_p">Precipitação</button>
+              <button type="button" data-mode="fdc" aria-pressed="false" data-i18n="m_fdc">Curva de permanência</button>
+            </div>
+            <button class="btn dl" id="d-csv" type="button" disabled data-i18n="dl_series">Baixar CSV</button>
+          </header>
+          <div class="chart side-chart" id="chart"><div class="loading" data-i18n="chart_empty">Selecione uma bacia no mapa, na lista ou no seletor acima.</div></div>
+          <p class="note" id="chart-hint" data-i18n="zoom_hint" hidden></p>
         </div>
       </div>
 
-      <div class="panel" id="chart-panel">
-        <header>
-          <h2 data-i18n="series_title">Séries diárias</h2><p id="series-sub"></p>
-          <div class="seg" id="chart-modes" role="group">
-            <button type="button" data-mode="q" aria-pressed="true" data-i18n="m_q">Hidrograma</button>
-            <button type="button" data-mode="p" aria-pressed="false" data-i18n="m_p">Precipitação</button>
-            <button type="button" data-mode="fdc" aria-pressed="false" data-i18n="m_fdc">Curva de permanência</button>
-          </div>
-          <button class="btn dl" id="d-csv" type="button" disabled data-i18n="dl_series">Baixar CSV</button>
-        </header>
-        <div class="chart sm" id="chart"><div class="loading" data-i18n="chart_empty">Selecione uma bacia no mapa, na lista ou no seletor acima.</div></div>
-        <p class="note" id="chart-hint" data-i18n="zoom_hint" hidden></p>
+      <!-- atributos da bacia selecionada -->
+      <div class="panel" id="attr-panel" hidden>
+        <header><h2 data-i18n="attr_basin">Atributos da bacia</h2></header>
+        <div class="seg wide" id="d-tabs" role="group"></div>
+        <div id="d-tab-body"></div>
+        <p class="note" data-i18n="disclaimer"></p>
       </div>
     </section>
 
