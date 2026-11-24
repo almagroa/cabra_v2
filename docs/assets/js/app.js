@@ -246,6 +246,56 @@
   const hbars = (pairs, colors, label) => `<div class="hbars">${pairs.map(([k, v]) =>
     `<div class="hbar"><span>${label(k)}</span><span class="bar"><i style="width:${Math.min(100, Math.max(0, v))}%;background:${colors[k]}"></i></span><b>${nf(v, 0)}%</b></div>`).join("")}</div>`;
 
+
+  // ------------------------------------------------------------------ pop-up sobre o mapa (como o painel do app Shiny)
+  // As barras ficam fixas no DOM e só mudam de largura, para animarem de uma bacia para outra.
+  const POP_COVER = ["forest", "grass", "shrub", "crops", "urban"];
+  const POP_SOIL = ["sand", "silt", "clay"];
+  let popMean = null, popBuilt = false;
+  function popMeans() {
+    if (popMean) return popMean;
+    const m = {}; const avg = (f) => { const v = catchments.map(f).filter((x) => x != null); return v.reduce((a, b) => a + b, 0) / v.length; };
+    POP_COVER.forEach((k) => (m["c_" + k] = avg((c) => c.cover && c.cover[k])));
+    POP_SOIL.forEach((k) => (m["s_" + k] = avg((c) => c.soil && c.soil[k])));
+    return (popMean = m);
+  }
+  function popBar(id, label, color) {
+    return `<div class="pb" data-b="${id}"><span>${label}</span><span class="tr"><i style="background:${color}"></i><u></u></span><b>–</b></div>`;
+  }
+  function buildPop() {
+    $("#map-pop").innerHTML = `<div class="ph"><div><small>${t("pop_head")}</small><b id="pop-name"></b></div><button type="button" class="x" id="pop-x" aria-label="${t("pop_close")}">×</button></div>
+      <dl id="pop-dl"></dl>
+      <div class="pt">${t("blk_cover")}</div>${POP_COVER.map((k) => popBar("c_" + k, t("c_" + k), COVER_COLORS[k])).join("")}
+      <div class="pt">${t("blk_soil")}</div>${POP_SOIL.map((k) => popBar("s_" + k, t("s_" + k), SOIL_COLORS[k])).join("")}
+      <div class="leg">${t("pop_vs")}</div>`;
+    $("#pop-x").addEventListener("click", () => { $("#map-pop").hidden = true; });
+    popBuilt = true;
+  }
+  function renderPop(c, rebuild) {
+    const el = $("#map-pop");
+    if (!c) { el.hidden = true; return; }
+    if (!popBuilt || rebuild) buildPop();
+    const wasHidden = el.hidden; el.hidden = false;
+    const mm = lang === "pt" ? "mm/dia" : "mm/day";
+    $("#pop-name").textContent = `${c.name}/${c.state}`;
+    $("#pop-dl").innerHTML = [
+      [t("pop_ana"), c.ana], [t("pop_biome"), biomeName(c.biome)], [t("pop_missing"), `${nf(c.missing, 1)}%`],
+      [t("k_area"), `${nf(c.area)} km²`], [t("pop_elev"), `${nf(c.elev)} m`], [t("k_prec"), `${nf(c.prec)} mm`],
+      [t("k_qmean"), `${nf(c.qmean, 2)} ${mm}`], [t("k_arid"), nf(c.aridity, 2)], [t("k_hdi"), nf(c.hdi, 2)],
+    ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+    const means = popMeans();
+    const vals = {}; POP_COVER.forEach((k) => (vals["c_" + k] = c.cover ? c.cover[k] : null)); POP_SOIL.forEach((k) => (vals["s_" + k] = c.soil ? c.soil[k] : null));
+    const apply = () => Object.entries(vals).forEach(([id, v]) => {
+      const r = el.querySelector(`[data-b="${id}"]`);
+      r.querySelector("i").style.width = `${Math.min(100, Math.max(0, v || 0))}%`;
+      r.querySelector("u").style.left = `calc(${Math.min(100, means[id] || 0)}% - 1px)`;
+      r.querySelector("b").textContent = v == null ? "–" : `${nf(v, 0)}%`;
+    });
+    // na primeira abertura parte de zero, para a barra crescer
+    if (wasHidden || rebuild) { el.querySelectorAll(".pb i").forEach((i) => (i.style.width = "0")); requestAnimationFrame(() => requestAnimationFrame(apply)); }
+    else apply();
+  }
+
   function renderAttrBox() {
     const c = selected;
     if (!c || !attributes) return;
@@ -269,13 +319,14 @@
     $("#list-box").hidden = true;
     $("#attr-box").hidden = false;
     $("#d-csv").disabled = false;
-    renderAttrBox(); renderKpis(); renderPicker(); highlight(id);
+    renderAttrBox(); renderKpis(); renderPicker(); highlight(id); renderPop(c);
     $("#series-sub").textContent = `${c.name}/${c.state} · ANA ${c.ana}`;
     const geom = await D.boundary(id);
     if (selected !== c) return;
     if (boundaryLayer) map.removeLayer(boundaryLayer);
     boundaryLayer = L.geoJSON(geom, { style: { color: css("--brand"), weight: 2, fillColor: css("--brand"), fillOpacity: 0.15 }, interactive: false }).addTo(map);
-    map.flyToBounds(boundaryLayer.getBounds(), { padding: [30, 30], maxZoom: 10, duration: 0.6 });
+    const popW = getComputedStyle($("#map-pop")).position === "absolute" ? $("#map-pop").offsetWidth + 20 : 0;
+    map.flyToBounds(boundaryLayer.getBounds(), { paddingTopLeft: [30, 30], paddingBottomRight: [30 + popW, 30], maxZoom: 10, duration: 0.6 });
     loadSeries(c);
   }
   function clearSelection() {
@@ -287,7 +338,7 @@
     $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`;
     $("#chart-hint").hidden = true;
     $("#series-sub").textContent = t("series_sub_none");
-    renderKpis(); renderPicker(); highlight(-1);
+    renderKpis(); renderPicker(); highlight(-1); renderPop(null);
   }
   $("#d-close").addEventListener("click", () => go("#map"));
 
@@ -449,8 +500,8 @@
     drawPoints(); renderPicker(); renderList(); renderKpis(); renderClasses(); renderTable();
     $("#map-title").textContent = t("map_title"); $("#map-sub").textContent = t("map_sub"); $("#map-stamp").textContent = t("map_stamp");
     route();
-    if (selected) { renderAttrBox(); if (series) drawChart(); }
-    else { $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`; $("#series-sub").textContent = t("series_sub_none"); }
+    if (selected) { renderAttrBox(); if (series) drawChart(); if (!$("#map-pop").hidden) renderPop(selected, true); }
+    else { popBuilt = false; $("#chart").innerHTML = `<div class="loading">${t("chart_empty")}</div>`; $("#series-sub").textContent = t("series_sub_none"); }
   }
 
   // ------------------------------------------------------------------ início
