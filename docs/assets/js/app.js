@@ -42,7 +42,7 @@
     try { localStorage.setItem("cabra-theme", root.dataset.theme); } catch (e) { /* ok */ }
     applyThemeBtn();
     setBase();
-    drawPoints();
+    drawPoints(); restyleStates();
     if (selected && series) drawChart();
   });
   $("#menu-btn").addEventListener("click", () => {
@@ -162,6 +162,18 @@
     const cs = catchments.filter(visible);
     if (cs.length) map.fitBounds(L.latLngBounds(cs.map((c) => [c.lat, c.lon])), { padding: [24, 24], maxZoom: 8 });
   }
+  // limites estaduais, acima dos contornos das bacias e sem eventos; o estado filtrado fica destacado
+  map.createPane("states");
+  map.getPane("states").style.zIndex = 380;
+  map.getPane("states").style.pointerEvents = "none";
+  const statesRenderer = L.canvas({ padding: 0.3, pane: "states" });
+  let statesLayer = null;
+  const stateStyle = (f) => {
+    const on = stateF && f.properties.uf === stateF;
+    return { pane: "states", renderer: statesRenderer, interactive: false, color: on ? css("--brand") : (isDark() ? "#8FA3C4" : "#5B6B82"), weight: on ? 2.2 : 0.9, opacity: on ? 0.9 : 0.55, fill: false };
+  };
+  const restyleStates = () => { if (statesLayer) statesLayer.setStyle(stateStyle); };
+  D.states().then((fc) => { statesLayer = L.geoJSON(fc, { style: stateStyle }).addTo(map); }).catch(() => { /* opcional */ });
   D.outlines().then((fc) => {
     outlines = L.geoJSON(fc, { renderer: canvas, interactive: false, style: outlineStyle() }).addTo(map);
     outlines.bringToBack();
@@ -175,7 +187,7 @@
     $("#basinSel").innerHTML = `<option value="">${t("all_basins")}</option>` + list.map((c) => `<option value="${c.id}" ${selected && selected.id === c.id ? "selected" : ""}>${esc(c.name)}/${c.state} · ${c.ana}</option>`).join("");
   }
   $("#f-state").addEventListener("change", (e) => {
-    stateF = e.target.value;
+    stateF = e.target.value; restyleStates();
     if (selected && !visible(selected)) { go("#map"); }
     renderPicker(); drawPoints(); renderList(); renderKpis();
     if (!selected || !visible(selected)) fitAll();

@@ -28,6 +28,8 @@
     attributes: () => getJSON("attributes.json"),
     // FeatureCollection com os contornos simplificados de todas as bacias (fundo do mapa)
     outlines: () => getJSON("outlines.json"),
+    // FeatureCollection com os limites estaduais ({uf, name}); Natural Earth, simplificado
+    states: () => getJSON("states.json"),
     // GeoJSON geometry of the catchment boundary
     boundary: (id) => getJSON(`boundaries/${id}.json`),
     // {q: {start, unit, values[]}, p: {start, unit, values[]}}
