@@ -310,6 +310,9 @@
   // ------------------------------------------------------------------ pop-up sobre o mapa (como o painel do app Shiny)
   // As barras ficam fixas no DOM e só mudam de largura, para animarem de uma bacia para outra.
   const POP_COVER = ["forest", "grass", "shrub", "crops", "urban"];
+  const LC_KEYS = ["forest", "savanna", "natural_nonforest", "pasture", "agriculture", "silviculture", "mosaic", "urban", "water", "other"];
+  const LC_COLORS = { forest: "#1F8D49", savanna: "#7DC975", natural_nonforest: "#C9B26B", pasture: "#E8D36A", agriculture: "#D46FC8", silviculture: "#7A5900", mosaic: "#F2B449", urban: "#D4271E", water: "#2F86E0", other: "#8E9AAB" };
+  let lcData = null, lcIdx = null, lcTimer = null;
   const POP_SOIL = ["sand", "silt", "clay"];
   let popMean = null, popBuilt = false;
   function popMeans() {
@@ -325,10 +328,17 @@
   function buildPop() {
     $("#map-pop").innerHTML = `<div class="ph"><div><small>${t("pop_head")}</small><b id="pop-name"></b></div><button type="button" class="x" id="pop-x" aria-label="${t("pop_close")}">×</button></div>
       <dl id="pop-dl"></dl>
-      <div class="pt">${t("blk_cover")}</div>${POP_COVER.map((k) => popBar("c_" + k, t("c_" + k), COVER_COLORS[k])).join("")}
+      <div id="pop-lc" hidden>
+        <div class="pt">${t("lc_title")} <span class="lc-year" id="lc-year"></span></div>
+        <div class="lc-ctl"><button type="button" id="lc-play" aria-label="${t("lc_play")}">▶</button><input type="range" id="lc-range" min="0" max="0" step="1" aria-label="${t("lc_year")}"></div>
+        ${LC_KEYS.map((k) => `<div class="pb" data-lc="${k}"><span>${t("lc_" + k)}</span><span class="tr"><i style="background:${LC_COLORS[k]}"></i></span><b>–</b></div>`).join("")}
+      </div>
+      <div id="pop-cv1"><div class="pt">${t("blk_cover")}</div>${POP_COVER.map((k) => popBar("c_" + k, t("c_" + k), COVER_COLORS[k])).join("")}</div>
       <div class="pt">${t("blk_soil")}</div>${POP_SOIL.map((k) => popBar("s_" + k, t("s_" + k), SOIL_COLORS[k])).join("")}
       <div class="leg">${t("pop_vs")}</div>`;
-    $("#pop-x").addEventListener("click", () => { $("#map-pop").hidden = true; });
+    $("#pop-x").addEventListener("click", () => { $("#map-pop").hidden = true; lcStop(); });
+    $("#lc-play").addEventListener("click", () => (lcTimer ? lcStop() : lcPlay()));
+    $("#lc-range").addEventListener("input", (e) => { lcStop(); lcIdx = +e.target.value; applyLC(); });
     popBuilt = true;
   }
   function renderPop(c, rebuild) {
@@ -352,8 +362,48 @@
       r.querySelector("b").textContent = v == null ? "–" : `${nf(v, 0)}%`;
     });
     // na primeira abertura parte de zero, para a barra crescer
-    if (wasHidden || rebuild) { el.querySelectorAll(".pb i").forEach((i) => (i.style.width = "0")); requestAnimationFrame(() => requestAnimationFrame(apply)); }
+    if (wasHidden || rebuild) { el.querySelectorAll(".pb i").forEach((i) => (i.style.width = "0")); requestAnimationFrame(() => requestAnimationFrame(() => { apply(); applyLC(); })); }
     else apply();
+    loadLC(c);
+  }
+
+  // ------------------------------------------------------------------ cobertura do solo anual (MapBiomas)
+  async function loadLC(c) {
+    let d = null;
+    try { d = await D.landcover(c.id); } catch (e) { d = null; }
+    if (selected !== c) return;
+    const changed = lcData !== d; lcData = d;
+    $("#pop-lc").hidden = !d; $("#pop-cv1").hidden = !!d;
+    if (d) {
+      const r = $("#lc-range"); r.max = d.years.length - 1;
+      if (lcIdx === null || lcIdx > d.years.length - 1) lcIdx = d.years.length - 1;
+      r.value = lcIdx;
+      LC_KEYS.forEach((k) => { const v = d.classes[k] || []; const row = $(`#map-pop [data-lc="${k}"]`); if (row) row.hidden = !(Math.max(0, ...v.map((x) => x || 0)) >= 0.5); });
+      applyLC();
+    } else lcStop();
+    if (changed && chartMode === "lc" && series) drawChart();
+  }
+  function applyLC() {
+    if (!lcData || lcIdx === null) return;
+    $("#lc-year").textContent = lcData.years[lcIdx];
+    $("#lc-range").value = lcIdx;
+    LC_KEYS.forEach((k) => {
+      const row = $(`#map-pop [data-lc="${k}"]`); if (!row) return;
+      const v = (lcData.classes[k] || [])[lcIdx];
+      row.querySelector("i").style.width = `${Math.min(100, Math.max(0, v || 0))}%`;
+      row.querySelector("b").textContent = v == null ? "–" : `${nf(v, v < 10 ? 1 : 0)}%`;
+    });
+  }
+  function lcPlay() {
+    if (!lcData) return;
+    if (lcIdx >= lcData.years.length - 1) lcIdx = 0;
+    $("#lc-play").textContent = "❚❚"; $("#lc-play").setAttribute("aria-label", t("lc_pause"));
+    applyLC();
+    lcTimer = setInterval(() => { if (!lcData || lcIdx >= lcData.years.length - 1) { lcStop(); return; } lcIdx++; applyLC(); }, 450);
+  }
+  function lcStop() {
+    if (lcTimer) { clearInterval(lcTimer); lcTimer = null; }
+    const b = $("#lc-play"); if (b) { b.textContent = "▶"; b.setAttribute("aria-label", t("lc_play")); }
   }
 
   function renderAttrBox() {
@@ -657,6 +707,31 @@
     const axis = { stroke: css("--fg-3"), grid: { stroke: css("--line"), width: 1 }, ticks: { stroke: css("--line"), width: 1 }, font: "11px 'IBM Plex Mono', monospace" };
     const cq = css("--q"), cp = css("--p");
     let opts, data;
+    if (chartMode === "lc") {
+      $("#chart-hint").hidden = true;
+      if (!lcData) { el.innerHTML = `<div class="loading">${t("lc_none")}</div>`; $("#series-sub").textContent = `${selected.name}/${selected.state} · ANA ${selected.ana}`; return; }
+      const keys = LC_KEYS.filter((k) => Math.max(0, ...(lcData.classes[k] || []).map((x) => x || 0)) >= 0.5);
+      const xs = lcData.years.map((y) => Date.UTC(y, 6, 1) / 1000), acc = xs.map(() => 0), raw = [];
+      data = [xs];
+      keys.forEach((k) => { const v = lcData.classes[k].map((x) => x || 0); raw.push(v); data.push(v.map((x, i) => (acc[i] += x))); });
+      const sers = [{ label: lang === "pt" ? "Ano" : "Year", value: (u, x) => (x == null ? "–" : new Date(x * 1000).getUTCFullYear()) }];
+      keys.forEach((k, j) => sers.push({ label: t("lc_" + k), stroke: LC_COLORS[k], width: 1, fill: j === 0 ? LC_COLORS[k] + "d0" : undefined, points: { show: false }, value: (u, x, si, i) => (i == null ? "–" : nf(raw[j][i], 1) + "%") }));
+      opts = {
+        width: w, height: h, legend: { show: false },
+        tzDate: (ts) => uPlot.tzDate(new Date(ts * 1e3), "Etc/UTC"),
+        cursor: { drag: { x: false, y: false }, points: { show: false } },
+        scales: { x: { time: true }, y: { range: [0, 100] } },
+        axes: [Object.assign({}, axis, { values: (u, vs) => vs.map((x) => new Date(x * 1000).getUTCFullYear()) }), Object.assign({}, axis, { size: 50, values: (u, vs) => vs.map((x) => x + "%") })],
+        series: sers,
+        bands: keys.slice(1).map((k, j) => ({ series: [j + 2, j + 1], fill: LC_COLORS[k] + "d0" })),
+        hooks: { setCursor: [(u) => { const i = u.cursor.idx; if (i != null && lcData && i !== lcIdx) { lcStop(); lcIdx = i; applyLC(); } }] },
+      };
+      plot = new uPlot(opts, data, el);
+      const lgH = plot.root.querySelector(".u-legend")?.offsetHeight || 0;
+      plot.setSize({ width: w, height: h - lgH });
+      $("#series-sub").textContent = `${selected.name}/${selected.state} · ${lcData.source} · ${lcData.years[0]}–${lcData.years[lcData.years.length - 1]}`;
+      return;
+    }
     if (chartMode === "fdc") {
       const v = series.q.values.filter((x) => x !== null && x > 0).sort((a, b) => b - a);
       const n = v.length, step = Math.max(1, Math.floor(n / 800)), xs = [], ys = [];

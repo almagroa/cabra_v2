@@ -37,5 +37,7 @@
     // chuva diária de outra fonte, série completa de uma só origem: {start, unit, source, values[]}
     // src: "brdwgd" (Xavier atualizado) ou "chirps"
     precip: (id, src) => getJSON(`precip/${src}/${id}.json`),
+    // cobertura do solo anual (MapBiomas): {source, years[], unit, classes: {forest: [...], ...}}
+    landcover: (id) => getJSON(`landcover/${id}.json`),
   };
 })();
